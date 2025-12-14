@@ -45,14 +45,25 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 
-# Electron
+# Electron - Build outputs
 frontend-electron/dist/
 frontend-electron/out/
 frontend-electron/build-output/
+frontend-electron/dist-app/
+frontend-electron/output/
+frontend-electron/release/
 frontend-electron/*.exe
 frontend-electron/*.dmg
 frontend-electron/*.AppImage
 frontend-electron/*.yml
+
+# Large binary files
+*.exe
+*.dll
+*.asar
+*.pak
+*.bin
+*.dat
 
 # React Native
 frontend-mobile/android/app/build/
