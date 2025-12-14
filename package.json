@@ -1,0 +1,47 @@
+{
+  "name": "projet-gestion-offline-first",
+  "version": "1.0.0",
+  "description": "Application complète de gestion de projets - Offline-First, Multiplateforme",
+  "author": "Votre Nom",
+  "license": "PROPRIETARY",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend-web",
+    "frontend-electron",
+    "frontend-mobile",
+    "shared"
+  ],
+  "scripts": {
+    "install:all": "npm install && npm run install:backend && npm run install:frontend",
+    "install:backend": "cd backend && npm install",
+    "install:frontend": "cd frontend-web && npm install && cd ../frontend-electron && npm install && cd ../frontend-mobile && npm install",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:web": "cd frontend-web && npm run dev",
+    "dev:electron": "cd frontend-electron && npm run dev",
+    "dev:mobile": "cd frontend-mobile && npm run android",
+    "build:all": "npm run build:backend && npm run build:web && npm run build:electron",
+    "build:backend": "cd backend && npm run build",
+    "build:web": "cd frontend-web && npm run build",
+    "build:electron": "cd frontend-electron && npm run build:win",
+    "test": "npm run test:backend && npm run test:web",
+    "test:backend": "cd backend && npm run test",
+    "test:web": "cd frontend-web && npm run test",
+    "lint": "npm run lint:backend && npm run lint:web",
+    "lint:backend": "cd backend && npm run lint",
+    "lint:web": "cd frontend-web && npm run lint",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "docker:up": "cd backend && docker-compose up -d",
+    "docker:down": "cd backend && docker-compose down",
+    "docker:logs": "cd backend && docker-compose logs -f"
+  },
+  "devDependencies": {
+    "prettier": "^3.1.0",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

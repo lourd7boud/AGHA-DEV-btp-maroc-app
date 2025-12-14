@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: btp-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: btpuser
+      POSTGRES_PASSWORD: BtpSecure2025!
+      POSTGRES_DB: btpdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - btp-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: btp-redis
+    restart: always
+    networks:
+      - btp-network
+
+  minio:
+    image: minio/minio
+    container_name: btp-minio
+    restart: always
+    environment:
+      MINIO_ROOT_USER: btpadmin
+      MINIO_ROOT_PASSWORD: BtpMinio2025!
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9001:9001"
+    networks:
+      - btp-network
+
+  backend:
+    build: ./backend
+    container_name: btp-backend
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: btpdb
+      POSTGRES_USER: btpuser
+      POSTGRES_PASSWORD: BtpSecure2025!
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: BtpJwtSecretKey2025VerySecureAndLong!
+      JWT_EXPIRES_IN: 7d
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - btp-network
+
+volumes:
+  postgres_data:
+  minio_data:
+
+networks:
+  btp-network:
+    driver: bridge
