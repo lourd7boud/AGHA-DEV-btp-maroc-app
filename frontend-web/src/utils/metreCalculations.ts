@@ -114,32 +114,46 @@ export function calculatePartiel(
   largeur?: number,
   profondeur?: number,
   nombre?: number,
-  diametre?: number
+  diametre?: number,
+  nombreSemblables?: number // Nombre des parties semblables (multiplicateur)
 ): number {
   const calcType = CALCULATION_TYPES_CONFIG[unite];
   
+  // Le multiplicateur par défaut est 1 si non spécifié
+  const multiplier = nombreSemblables && nombreSemblables > 0 ? nombreSemblables : 1;
+  
+  let result = 0;
+  
   switch (calcType.type) {
     case 'volume':
-      return (longueur || 0) * (largeur || 0) * (profondeur || 0);
+      result = (longueur || 0) * (largeur || 0) * (profondeur || 0);
+      break;
       
     case 'surface':
-      return (longueur || 0) * (largeur || 0);
+      result = (longueur || 0) * (largeur || 0);
+      break;
       
     case 'lineaire':
-      return longueur || 0;
+      result = longueur || 0;
+      break;
       
     case 'poids': {
       const poidsUnitaire = getPoidsUnitaire(diametre || 0);
       const totalKg = (nombre || 0) * (longueur || 0) * poidsUnitaire;
-      return unite === 'T' ? totalKg / 1000 : totalKg;
+      result = unite === 'T' ? totalKg / 1000 : totalKg;
+      break;
     }
       
     case 'unite':
-      return nombre || 0;
+      result = nombre || 0;
+      break;
       
     default:
-      return 0;
+      result = 0;
   }
+  
+  // Multiplier par le nombre de parties semblables
+  return result * multiplier;
 }
 
 // Fonction pour formater un nombre avec décimales

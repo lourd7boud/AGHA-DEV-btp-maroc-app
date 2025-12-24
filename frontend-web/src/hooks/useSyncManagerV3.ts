@@ -229,6 +229,16 @@ const applyRemoteOperations = async (operations: RemoteOperation[]): Promise<{
   for (const op of sortedOps) {
     const entityId = normalizeEntityId(op.entity, op.entityId);
 
+    // CRITICAL: Block DELETE operations from sync pull
+    // DELETE should only be applied via direct user action, not sync
+    // This prevents data loss when another client deletes data
+    if (op.type === 'DELETE') {
+      console.log(`🛡️ BLOCKED DELETE from sync pull: ${op.entity}:${entityId}`);
+      result.skipped++;
+      addSyncLog({ action: 'SKIP_DELETE', entity: op.entity, entityId: op.entityId, success: false, error: 'DELETE blocked from remote sync' });
+      continue;
+    }
+
     // Check for pending local sync op
     const pendingConflict = await db.syncOperations
       .where('entityId')
@@ -579,7 +589,10 @@ export const useSyncManagerV3 = (userId: string | null) => {
   // ==================== REALTIME CONNECTION ====================
 
   const connectRealtime = useCallback(() => {
-    if (!userId || realtimeSetupRef.current) return;
+    if (!userId) return;
+
+    // Allow reconnection if not already connected
+    if (realtimeSetupRef.current && realtimeSync.isConnected()) return;
 
     const token = localStorage.getItem('authToken');
     if (!token) return;
@@ -718,11 +731,42 @@ export const useSyncManagerV3 = (userId: string | null) => {
         }
       }
 
-      // Handle errors
+      // Handle errors - Mark permanently failed ops to prevent infinite retry
       const errors = result.data?.failed || result.failed || [];
       if (errors.length > 0) {
         console.error('❌ Some operations failed:', errors);
         addSyncLog({ action: 'PUSH_ERRORS', success: false, data: { errors } });
+        
+        // CRITICAL: Mark operations with permanent errors as "failed" to stop retrying
+        // Errors like "numeric field overflow" will never succeed, so stop trying
+        const fatalErrorPatterns = ['overflow', 'invalid', 'constraint', 'duplicate key'];
+        
+        for (const errItem of errors) {
+          const errorMsg = (errItem.error || '').toLowerCase();
+          const isFatalError = fatalErrorPatterns.some(pattern => errorMsg.includes(pattern));
+          
+          if (isFatalError) {
+            // Find the matching pending op and mark it as failed (synced=true with error flag)
+            const failedOp = pendingOps.find(op => 
+              op.id === errItem.id || 
+              cleanEntityId(op.entityId) === errItem.id ||
+              op.entityId.includes(errItem.id)
+            );
+            
+            if (failedOp && failedOp.id) {
+              console.warn(`🗑️ Marking permanently failed op for deletion: ${failedOp.entity}:${failedOp.entityId}`);
+              // Delete the failed operation to prevent infinite retries
+              await db.syncOperations.delete(failedOp.id);
+              addSyncLog({ 
+                action: 'DELETE_FAILED_OP', 
+                entity: failedOp.entity, 
+                entityId: failedOp.entityId, 
+                success: true, 
+                error: errItem.error 
+              });
+            }
+          }
+        }
       }
 
       addSyncLog({ action: 'PUSH_COMPLETE', success: true, data: { pushed: ackOps.length } });
@@ -865,16 +909,30 @@ export const useSyncManagerV3 = (userId: string | null) => {
     return cleanup;
   }, [sync, autoSyncEnabled]);
 
-  // Auto-sync every 5 minutes
+  // Adaptive sync interval: faster when WebSocket disconnected, slower when connected
   useEffect(() => {
     if (!autoSyncEnabled || !isOnline()) return;
 
-    const interval = setInterval(() => {
-      sync().catch(console.error);
-    }, 5 * 60 * 1000);
+    // Shorter interval when WebSocket is not connected (10 seconds)
+    // Longer interval when connected (2 minutes) as backup
+    const getInterval = () => {
+      return syncState.realtimeConnected ? 2 * 60 * 1000 : 10 * 1000;
+    };
 
-    return () => clearInterval(interval);
-  }, [sync, autoSyncEnabled]);
+    let intervalId: ReturnType<typeof setInterval>;
+    
+    const startInterval = () => {
+      clearInterval(intervalId);
+      intervalId = setInterval(() => {
+        sync().catch(console.error);
+      }, getInterval());
+    };
+
+    startInterval();
+
+    // Re-evaluate interval when realtime status changes
+    return () => clearInterval(intervalId);
+  }, [sync, autoSyncEnabled, syncState.realtimeConnected]);
 
   // Update pending count on mount
   useEffect(() => {
@@ -903,6 +961,20 @@ export const useSyncManagerV3 = (userId: string | null) => {
 
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
+  }, [userId, connectRealtime]);
+
+  // Periodic WebSocket health check - try to reconnect every 30 seconds if disconnected
+  useEffect(() => {
+    if (!userId || !isOnline()) return;
+
+    const healthCheck = setInterval(() => {
+      if (!realtimeSync.isConnected()) {
+        console.log('🔄 WebSocket health check: Not connected, attempting reconnect...');
+        connectRealtime();
+      }
+    }, 30000); // Every 30 seconds
+
+    return () => clearInterval(healthCheck);
   }, [userId, connectRealtime]);
 
   // ==================== CLEAR PENDING OPERATIONS ====================

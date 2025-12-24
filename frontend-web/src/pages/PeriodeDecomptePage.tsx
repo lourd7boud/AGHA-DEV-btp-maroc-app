@@ -131,12 +131,26 @@ const PeriodeDecomptePage: FC = () => {
     const calculatePreviousPayments = async () => {
       if (!periode || !projectId || !project) return;
 
-      // Récupérer tous les décomptes précédents
-      const decomptesPrecedentsArray = await db.decompts
+      // Use the correct projectId format for query
+      const queryProjectId = projectId.startsWith('project:') ? projectId : `project:${projectId}`;
+
+      // Récupérer tous les décomptes précédents de ce projet
+      const allDecomptes = await db.decompts
         .where('projectId')
-        .equals(`project:${projectId}`)
-        .and((d) => !d.deletedAt && d.numero < periode.numero)
+        .equals(queryProjectId)
+        .and((d) => !d.deletedAt)
         .toArray();
+
+      // Filter to get only previous décomptes (numero < current)
+      const decomptesPrecedentsArray = allDecomptes.filter(d => d.numero < periode.numero);
+
+      console.log('📊 Calculating previous payments:', {
+        queryProjectId,
+        currentPeriodeNumero: periode.numero,
+        allDecomptesCount: allDecomptes.length,
+        previousDecomptesCount: decomptesPrecedentsArray.length,
+        decomptes: decomptesPrecedentsArray.map(d => ({ numero: d.numero, montant: d.montantTotal }))
+      });
 
       if (decomptesPrecedentsArray.length === 0) {
         // Pas de décomptes précédents
@@ -145,7 +159,7 @@ const PeriodeDecomptePage: FC = () => {
         return;
       }
 
-      // Récupérer l'année du projet (de dateOuverture ou de la période actuelle)
+      // Récupérer l'année de la période actuelle
       const anneePeriodeActuelle = new Date(periode.dateDebut).getFullYear();
 
       let totalExercicesAnterieurs = 0;
@@ -155,19 +169,37 @@ const PeriodeDecomptePage: FC = () => {
       for (const decompt of decomptesPrecedentsArray) {
         // Récupérer la période du décompte pour connaître son année
         const periodeDecompt = await db.periodes.get(decompt.periodeId);
-        if (!periodeDecompt) continue;
+        if (!periodeDecompt) {
+          console.warn('⚠️ Période not found for décompte:', decompt.id);
+          continue;
+        }
 
         const anneeDecompt = new Date(periodeDecompt.dateDebut).getFullYear();
+        // Use montantTotal - this is "Montant de l'acompte à délivrer" (the net amount to pay)
+        // NOT totalTTC which is "Total Général TTC"
+        const montantAPrendre = decompt.montantTotal || 0;
 
-        // Si le décompte est d'une année différente → exercices antérieurs
+        console.log('📅 Décompte:', {
+          numero: decompt.numero,
+          anneeDecompt,
+          anneePeriodeActuelle,
+          montant: montantAPrendre
+        });
+
+        // Si le décompte est d'une année précédente → exercices antérieurs
         if (anneeDecompt < anneePeriodeActuelle) {
-          totalExercicesAnterieurs += decompt.montantTotal;
+          totalExercicesAnterieurs += montantAPrendre;
         } 
         // Si le décompte est de la même année → exercice en cours
         else if (anneeDecompt === anneePeriodeActuelle) {
-          totalExerciceEnCours += decompt.montantTotal;
+          totalExerciceEnCours += montantAPrendre;
         }
       }
+
+      console.log('💰 Calculated totals:', {
+        totalExercicesAnterieurs,
+        totalExerciceEnCours
+      });
 
       setDepensesExercicesAnterieurs(majoration(totalExercicesAnterieurs));
       setDecomptesPrecedents(majoration(totalExerciceEnCours));
@@ -176,18 +208,30 @@ const PeriodeDecomptePage: FC = () => {
     calculatePreviousPayments();
   }, [periode, projectId, project]);
 
+  // Helper to normalize bordereauLigneId (remove prefix if present)
+  const normalizeBordereauLigneId = (id: string): string => {
+    if (!id) return '';
+    return id.replace(/^bordereau:/, '');
+  };
+
   // Charger les lignes du décompte - TOUJOURS mettre à jour les quantités depuis les métrés
   useEffect(() => {
     // Générer les lignes depuis bordereau + metres (les métrés sont déjà cumulés)
     if (bordereau && metres.length > 0) {
+      const cleanBordereauId = normalizeBordereauLigneId(bordereau.id);
+      
       const decompteLines: DecompteLigne[] = bordereau.lignes.map((ligne) => {
-        // Trouver le métré correspondant
-        const metre = metres.find(
-          (m) => m.bordereauLigneId === `${bordereau.id}-ligne-${ligne.numero}`
-        );
+        const ligneId = `${cleanBordereauId}-ligne-${ligne.numero}`;
+        
+        // Trouver le métré correspondant (compare normalized IDs)
+        const metre = metres.find((m) => {
+          const metreLineId = normalizeBordereauLigneId(m.bordereauLigneId);
+          return metreLineId === ligneId;
+        });
 
         // Les métrés sont déjà cumulés (copiés de la période précédente + ajouts)
-        const quantiteRealisee = majoration(metre?.totalPartiel || 0);
+        // Use totalCumule for cumulative, or totalPartiel for current period
+        const quantiteRealisee = majoration(metre?.totalCumule || metre?.totalPartiel || 0);
         const prixUnitaireHT = majoration(ligne.prixUnitaire || 0);
         const montantHT = majoration(quantiteRealisee * prixUnitaireHT);
 
@@ -199,13 +243,15 @@ const PeriodeDecomptePage: FC = () => {
           quantiteRealisee,
           prixUnitaireHT,
           montantHT,
-          bordereauLigneId: `${bordereau.id}-ligne-${ligne.numero}`,
+          bordereauLigneId: ligneId,
           metreId: metre?.id,
         };
       });
 
       setLignes(decompteLines);
     } else if (bordereau && metres.length === 0) {
+      const cleanBordereauId = normalizeBordereauLigneId(bordereau.id);
+      
       // إذا لم يكن هناك ميتري، عرض البوردرو فقط بكميات صفر
       const decompteLines: DecompteLigne[] = bordereau.lignes.map((ligne) => {
         const prixUnitaireHT = majoration(ligne.prixUnitaire || 0);
@@ -217,7 +263,7 @@ const PeriodeDecomptePage: FC = () => {
           quantiteRealisee: 0,
           prixUnitaireHT,
           montantHT: 0,
-          bordereauLigneId: `${bordereau.id}-ligne-${ligne.numero}`,
+          bordereauLigneId: `${cleanBordereauId}-ligne-${ligne.numero}`,
         };
       });
       setLignes(decompteLines);
@@ -370,7 +416,7 @@ const PeriodeDecomptePage: FC = () => {
       }
 
       alert('Décompte enregistré avec succès !');
-      navigate(`/projects/${projectId}/periodes`);
+      // Stay on the same page - don't navigate away
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
       alert('Erreur lors de la sauvegarde du décompte');
@@ -458,7 +504,7 @@ const PeriodeDecomptePage: FC = () => {
       {/* Header */}
       <div className="mb-6">
         <button
-          onClick={() => navigate(`/projects/${projectId}/periodes`)}
+          onClick={() => navigate(`/projects/${rawProjectId}/metres`)}
           className="btn-secondary mb-4 flex items-center gap-2"
         >
           <ArrowLeft className="w-4 h-4" />

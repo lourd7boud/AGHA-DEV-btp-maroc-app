@@ -31,9 +31,11 @@ import photoRoutes from './routes/photo.routes';
 import pvRoutes from './routes/pv.routes';
 import attachmentRoutes from './routes/attachment.routes';
 import periodeRoutes from './routes/periode.routes';
-import syncRoutes from './routes/sync.routes.v2';  // Use enhanced sync controller v2
+import syncRoutes from './routes/sync.routes';
+import assetRoutes from './routes/asset.routes';
+import healthRoutes from './routes/health.routes';
 
-console.log('✅ All routes imported successfully (using sync.controller.v2)');
+console.log('✅ All routes imported successfully');
 
 // dotenv is preloaded via -r dotenv/config in package.json
 
@@ -67,6 +69,7 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 // API Routes
+app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/bordereau', bordereauRoutes);
@@ -77,6 +80,7 @@ app.use('/api/pv', pvRoutes);
 app.use('/api/attachments', attachmentRoutes);
 app.use('/api/periodes', periodeRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/assets', assetRoutes);
 
 // Error handling
 app.use(notFound);

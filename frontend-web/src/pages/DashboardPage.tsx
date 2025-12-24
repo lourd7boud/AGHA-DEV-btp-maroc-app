@@ -90,25 +90,33 @@ const DashboardPage: FC = () => {
     const activeProjects = projects.filter((p) => p.status === 'active');
     const completedProjects = projects.filter((p) => p.status === 'completed');
     
-    // Calculer le budget total depuis les bordereaux
-    const totalBudget = bordereaux?.reduce((sum, b) => {
-      const montantHT = b.lignes.reduce((s, l) => {
-        const quantite = parseFloat(String(l.quantite)) || 0;
-        const prix = parseFloat(String(l.prixUnitaire)) || 0;
-        return s + (quantite * prix);
+    // Calculer le budget total = somme des montants TTC de tous les bordereaux
+    // Pour chaque projet, on calcule le montant TTC depuis les lignes du bordereau
+    let totalBudget = 0;
+    let totalRealized = 0;
+    
+    for (const project of projects) {
+      // Budget: calculer depuis les bordereaux du projet
+      const projectBordereaux = bordereaux?.filter((b) => b.projectId === project.id) || [];
+      const projectBudgetTTC = projectBordereaux.reduce((sum, b) => {
+        const montantHT = b.lignes.reduce((s, l) => {
+          return s + (Number(l.quantite) * Number(l.prixUnitaire || 0));
+        }, 0);
+        return sum + (montantHT * 1.2); // TTC = HT × 1.2
       }, 0);
-      return sum + montantHT * 1.2;
-    }, 0) || 0;
+      totalBudget += projectBudgetTTC;
+      
+      // Réalisé: calculer depuis les décomptes du projet
+      const projectDecompts = decompts?.filter((d) => d.projectId === project.id) || [];
+      const projectRealizedTTC = projectDecompts.reduce((sum, d) => {
+        return sum + (Number(d.totalTTC) || Number(d.montantTotal) || 0);
+      }, 0);
+      totalRealized += projectRealizedTTC;
+    }
 
-    // Calculer le montant réalisé depuis les décomptes
-    const totalRealized = decompts?.reduce((sum, d) => {
-      const montant = parseFloat(String(d.montantTotal)) || 0;
-      return sum + montant;
-    }, 0) || 0;
-
-    // Calculer la progression moyenne
-    const avgProgress = activeProjects.length > 0
-      ? activeProjects.reduce((sum, p) => sum + (p.progress || 0), 0) / activeProjects.length
+    // Calculer la progression = (Réalisé / Budget) × 100
+    const progressPercent = totalBudget > 0 
+      ? Math.round((totalRealized / totalBudget) * 100)
       : 0;
 
     // Projets qui ont besoin d'un nouveau décompte
@@ -135,7 +143,7 @@ const DashboardPage: FC = () => {
       completedProjects: completedProjects.length,
       totalBudget,
       totalRealized,
-      averageProgress: Math.round(avgProgress),
+      averageProgress: progressPercent, // Maintenant c'est le % de réalisation financière
       projectsNeedingDecompte: needDecompte.length,
       upcomingDeadlines: upcomingDeadlines.length,
     };
@@ -280,6 +288,11 @@ const DashboardPage: FC = () => {
           return sum + montantHT * 1.2; // HT * 1.2 = TTC (TVA 20%)
         }, 0);
         
+        // Calculer le montant réalisé depuis les décomptes de ce projet
+        const montantRealise = projectDecompts.reduce((sum, d) => {
+          return sum + (Number(d.totalTTC) || Number(d.montantTotal) || 0);
+        }, 0);
+        
         let urgency = 'normal';
         let reason = '';
         
@@ -299,13 +312,14 @@ const DashboardPage: FC = () => {
           }
         }
         
-        return { ...p, lastDecompte, urgency, reason, montantTTC };
+        // Extraire le numéro pour le tri
+        const marcheNum = parseInt(p.marcheNo.split('/')[0]) || 999;
+        
+        return { ...p, lastDecompte, urgency, reason, montantTTC, montantRealise, marcheNum };
       })
-      .sort((a, b) => {
-        const order = { critical: 0, high: 1, medium: 2, normal: 3 };
-        return (order[a.urgency as keyof typeof order] || 3) - (order[b.urgency as keyof typeof order] || 3);
-      })
-      .slice(0, 8);
+      // Trier par N° Marché (numéro) croissant
+      .sort((a, b) => a.marcheNum - b.marcheNum)
+      .slice(0, 10); // Afficher jusqu'à 10 projets
   }, [projects, decompts, bordereaux]);
 
   const getAlertStyle = (type: Alert['type']) => {

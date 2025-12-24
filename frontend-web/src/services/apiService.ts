@@ -69,23 +69,116 @@ class ApiService {
     this.client.interceptors.response.use(
       (response) => {
         console.log('API Response:', response.status, response.config.url, response.data);
+        
+        // Check for new token in response headers (auto-refresh from server)
+        const newToken = response.headers['x-new-token'];
+        if (newToken) {
+          console.log('🔄 Token auto-refreshed by server, updating storage');
+          this.updateStoredToken(newToken);
+        }
+        
         return response;
       },
       async (error: AxiosError) => {
         console.error('API Error:', error.response?.status, error.config?.url, error.response?.data);
         
-        if (error.response?.status === 401 && !error.config?.url?.includes('/auth/login')) {
-          localStorage.removeItem('authToken');
-          localStorage.removeItem('auth-storage');
-          localStorage.removeItem('lastSyncTimestamp');
+        const originalRequest = error.config;
+        
+        // Only handle 401 for non-auth endpoints and avoid infinite loops
+        if (error.response?.status === 401 && 
+            originalRequest &&
+            !originalRequest.url?.includes('/auth/login') && 
+            !originalRequest.url?.includes('/auth/register') &&
+            !originalRequest.url?.includes('/auth/refresh') &&
+            !(originalRequest as any)._retry) {
           
-          if (!window.location.hash.includes('/login')) {
-            window.location.hash = '#/login';
+          // Mark this request as retried to avoid infinite loops
+          (originalRequest as any)._retry = true;
+          
+          // Try to refresh token
+          const token = localStorage.getItem('authToken');
+          if (token) {
+            try {
+              console.log('🔄 Attempting to refresh token...');
+              
+              // Use a fresh axios instance to avoid interceptor loops
+              const refreshAxios = axios.create({
+                baseURL: this.client.defaults.baseURL,
+                headers: { 'Content-Type': 'application/json' }
+              });
+              
+              const refreshResponse = await refreshAxios.post('/auth/refresh', { token });
+              
+              if (refreshResponse.data?.data?.token) {
+                const newToken = refreshResponse.data.data.token;
+                console.log('✅ Token refreshed successfully');
+                this.updateStoredToken(newToken);
+                
+                // Retry original request with new token
+                originalRequest.headers = originalRequest.headers || {};
+                originalRequest.headers.Authorization = `Bearer ${newToken}`;
+                return this.client.request(originalRequest);
+              }
+            } catch (refreshError: any) {
+              console.log('🔒 Token refresh failed:', refreshError.response?.status || refreshError.message);
+              // Only logout if refresh truly failed (not network error)
+              if (refreshError.response?.status === 401 || refreshError.response?.status === 403) {
+                this.handleLogout();
+              }
+            }
+          } else {
+            // No token at all, redirect to login
+            this.handleLogout();
           }
         }
+        
         return Promise.reject(error);
       }
     );
+  }
+  
+  private updateStoredToken(newToken: string) {
+    localStorage.setItem('authToken', newToken);
+    
+    // Update zustand auth storage
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsed = JSON.parse(authStorage);
+        if (parsed.state) {
+          parsed.state.token = newToken;
+          localStorage.setItem('auth-storage', JSON.stringify(parsed));
+        }
+      } catch (e) {
+        console.warn('Failed to update auth storage:', e);
+      }
+    }
+  }
+  
+  private handleLogout() {
+    console.log('🚪 Logging out user due to auth failure');
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('auth-storage');
+    localStorage.removeItem('lastSyncTimestamp');
+    
+    // Check if using hash router or regular router
+    const isHashRouter = window.location.hash.includes('#/');
+    const currentPath = isHashRouter 
+      ? window.location.hash.replace('#', '') 
+      : window.location.pathname;
+    
+    if (!currentPath.includes('/login')) {
+      if (isHashRouter) {
+        window.location.hash = '#/login';
+      } else {
+        window.location.href = '/login';
+      }
+    }
+  }
+
+  async refreshToken(token: string) {
+    const response = await this.client.post('/auth/refresh', { token });
+    return response.data;
   }
 
   async register(data: { email: string; password: string; firstName: string; lastName: string }) {

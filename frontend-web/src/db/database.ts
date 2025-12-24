@@ -92,10 +92,45 @@ export interface Bordereau {
   deletedAt?: string;
 }
 
+// ============== HIERARCHICAL METRE STRUCTURE ==============
+// Structure: Section (Douar) → SubSection (Element) → MetreLigne (Measurement)
+
+/**
+ * Section principale - représente un lieu/douar
+ * Exemple: "AIT WARKHAN-AIT WAHMAN", "DOUAR TAFRAOUT"
+ */
+export interface MetreSection {
+  id: string;
+  titre: string;                    // Titre de la section (ex: "pour (AIT WARKHAN-AIT WAHMAN)")
+  ordre: number;                    // Ordre d'affichage
+  couleur?: string;                 // Couleur pour différencier (optionnel)
+  isCollapsed?: boolean;            // État plié/déplié
+}
+
+/**
+ * Sous-section - représente un élément de construction
+ * Exemple: "semeille", "Potaux", "radier", "voile", "dalle"
+ */
+export interface MetreSubSection {
+  id: string;
+  sectionId: string;                // Référence à la section parente
+  titre: string;                    // Titre (ex: "semeille", "radier + voile")
+  ordre: number;                    // Ordre d'affichage dans la section
+  isCollapsed?: boolean;            // État plié/déplié
+}
+
+/**
+ * Ligne de mesure - les données de calcul réelles
+ */
 export interface MetreLigne {
   id: string;
+  sectionId?: string;               // Référence à la section (optionnel pour rétrocompatibilité)
+  subSectionId?: string;            // Référence à la sous-section (optionnel)
   numero: number;
   designation: string;
+  
+  // Nombre des parties semblables (multiplicateur)
+  nombreSemblables?: number;
   
   // Dimensions selon l'unité
   longueur?: number;
@@ -120,6 +155,11 @@ export interface Metre {
   reference: string;
   designationBordereau: string;
   unite: string;
+  
+  // ============== HIERARCHICAL STRUCTURE ==============
+  // Sections et sous-sections pour organisation hiérarchique
+  sections?: MetreSection[];        // Sections principales (Douars, Lieux)
+  subSections?: MetreSubSection[];  // Sous-sections (Éléments: semeille, radier, etc.)
   
   // Lignes de métré
   lignes: MetreLigne[];

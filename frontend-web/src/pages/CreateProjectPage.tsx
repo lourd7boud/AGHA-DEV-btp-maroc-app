@@ -239,19 +239,6 @@ const CreateProjectPage: FC = () => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Date d'ouverture *
-              </label>
-              <input
-                type="date"
-                required
-                className="input"
-                value={formData.dateOuverture}
-                onChange={(e) => setFormData({ ...formData, dateOuverture: e.target.value })}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
                 Commune (CT)
               </label>
               <select
@@ -287,6 +274,25 @@ const CreateProjectPage: FC = () => {
                   <option value="Tlite">Tlite</option>
                   <option value="Tizounine">Tizounine</option>
                 </optgroup>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Statut *
+              </label>
+              <select
+                required
+                className="input"
+                value={formData.status}
+                onChange={(e) =>
+                  setFormData({ ...formData, status: e.target.value as any })
+                }
+              >
+                <option value="draft">Brouillon</option>
+                <option value="active">Actif</option>
+                <option value="completed">Terminé</option>
+                <option value="archived">Archivé</option>
               </select>
             </div>
           </div>
@@ -436,6 +442,29 @@ const CreateProjectPage: FC = () => {
               />
             </div>
 
+          </div>
+        </div>
+
+        {/* Gestion des délais */}
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Gestion des délais
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Date d'ouverture *
+              </label>
+              <input
+                type="date"
+                required
+                className="input"
+                value={formData.dateOuverture}
+                onChange={(e) => setFormData({ ...formData, dateOuverture: e.target.value })}
+              />
+              <p className="text-xs text-gray-500 mt-1">Date d'ouverture des plis</p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Délais d'exécution (mois)
@@ -448,35 +477,9 @@ const CreateProjectPage: FC = () => {
                 placeholder="Ex: 10"
                 min="1"
               />
+              <p className="text-xs text-gray-500 mt-1">Durée du marché en mois</p>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Statut *
-              </label>
-              <select
-                required
-                className="input"
-                value={formData.status}
-                onChange={(e) =>
-                  setFormData({ ...formData, status: e.target.value as any })
-                }
-              >
-                <option value="draft">Brouillon</option>
-                <option value="active">Actif</option>
-                <option value="completed">Terminé</option>
-                <option value="archived">Archivé</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* Gestion des délais */}
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Gestion des délais
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 O.S.C (Date début des travaux)
@@ -488,43 +491,6 @@ const CreateProjectPage: FC = () => {
                 onChange={(e) => setFormData({ ...formData, osc: e.target.value })}
               />
               <p className="text-xs text-gray-500 mt-1">Ordre de Service de Commencement</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Date achèvement travaux
-              </label>
-              <input
-                type="date"
-                className="input"
-                value={formData.achevementTravaux}
-                onChange={(e) => setFormData({ ...formData, achevementTravaux: e.target.value })}
-              />
-              <p className="text-xs text-gray-500 mt-1">Date prévue de fin des travaux</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Réception provisoire
-              </label>
-              <input
-                type="date"
-                className="input"
-                value={formData.dateReceptionProvisoire}
-                onChange={(e) => setFormData({ ...formData, dateReceptionProvisoire: e.target.value })}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Réception définitive
-              </label>
-              <input
-                type="date"
-                className="input"
-                value={formData.dateReceptionDefinitive}
-                onChange={(e) => setFormData({ ...formData, dateReceptionDefinitive: e.target.value })}
-              />
             </div>
           </div>
         </div>

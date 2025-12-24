@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuthStore } from './store/authStore';
 import { useSyncManager } from './hooks/useSyncManager';
 import { useAutoUpdater } from './hooks/useAutoUpdater';
+import { migrateCompaniesFromProjects } from './services/companyService';
 
 // Pages
 import LoginPage from './pages/LoginPage';
@@ -15,8 +16,12 @@ import CreateProjectPage from './pages/CreateProjectPage';
 import EditProjectPage from './pages/EditProjectPage';
 import DelaisPage from './pages/DelaisPage';
 import BordereauPage from './pages/BordereauPage';
-import MetrePage from './pages/MetrePage';
-import PeriodesPage from './pages/PeriodesPage';
+// New structured pages - Métré/Décompte with proper numbering
+import MetreListPage from './pages/MetreListPage';
+import MetreEditPage from './pages/MetreEditPage';
+import MetrePageV3 from './pages/MetrePageV3';
+import DecompteListPage from './pages/DecompteListPage';
+// Legacy pages - kept for backward compatibility
 import PeriodeMetrePage from './pages/PeriodeMetrePage';
 import PeriodeDecomptePage from './pages/PeriodeDecomptePage';
 import AttachementPage from './pages/AttachementPage';
@@ -30,7 +35,7 @@ import { UpdateNotification } from './components/UpdateNotification';
 
 function App() {
   useTranslation(); // Initialize i18n
-  const { user, checkAuth } = useAuthStore();
+  const { user, isInitialized, checkAuth } = useAuthStore();
   const { syncState, sync, clearPendingOperations } = useSyncManager(user?.id || null);
   
   // Setup auto-updater (only works in Electron)
@@ -40,22 +45,40 @@ function App() {
     checkAuth();
   }, [checkAuth]);
 
-  // Déclencher une synchronisation au chargement si l'utilisateur est connecté
+  // Déclencher une synchronisation SEULEMENT après que l'auth soit vérifiée
   useEffect(() => {
-    if (user) {
-      // Attendre un peu avant la sync pour s'assurer que l'auth est bien établie
-      const timer = setTimeout(() => {
-        sync().catch((error) => {
-          // Ne pas afficher l'erreur si c'est une erreur d'auth
-          if (error.response?.status !== 401) {
-            console.error('Sync error on mount:', error);
-          }
-        });
-      }, 500);
-      
-      return () => clearTimeout(timer);
+    // CRITICAL: Wait for auth to be initialized AND user to exist
+    if (!isInitialized) {
+      console.log('⏳ Waiting for auth to initialize...');
+      return;
     }
-  }, [user?.id]); // Ne dépend que de l'ID pour éviter les boucles
+    
+    if (!user) {
+      console.log('👤 No user, skipping sync');
+      return;
+    }
+    
+    console.log('✅ Auth initialized, starting sync for user:', user.id);
+    
+    // Migrer les entreprises depuis les projets existants
+    migrateCompaniesFromProjects().then(count => {
+      if (count > 0) {
+        console.log(`📦 ${count} entreprises migrées depuis les projets`);
+      }
+    });
+    
+    // Small delay to ensure everything is ready
+    const timer = setTimeout(() => {
+      sync().catch((error) => {
+        // Ne pas afficher l'erreur si c'est une erreur d'auth
+        if (error.response?.status !== 401) {
+          console.error('Sync error on mount:', error);
+        }
+      });
+    }, 300);
+    
+    return () => clearTimeout(timer);
+  }, [isInitialized, user?.id, sync]); // Depend on isInitialized AND user?.id
 
   return (
     <>
@@ -161,7 +184,7 @@ function App() {
           element={
             user ? (
               <Layout>
-                <MetrePage />
+                <MetreListPage />
               </Layout>
             ) : (
               <Navigate to="/login" replace />
@@ -170,12 +193,90 @@ function App() {
         />
         
         <Route
-          path="/projects/:projectId/periodes"
+          path="/projects/:projectId/metres"
           element={
             user ? (
               <Layout>
-                <PeriodesPage />
+                <MetreListPage />
               </Layout>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        
+        {/* MetrePageV3 - Hierarchical structure like Excel */}
+        <Route
+          path="/projects/:projectId/metre-v3"
+          element={
+            user ? (
+              <Layout>
+                <MetrePageV3 />
+              </Layout>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        
+        <Route
+          path="/projects/:projectId/metre/:periodeId"
+          element={
+            user ? (
+              <Layout>
+                <MetreEditPage />
+              </Layout>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        
+        <Route
+          path="/projects/:projectId/decompte"
+          element={
+            user ? (
+              <Layout>
+                <DecompteListPage />
+              </Layout>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        
+        <Route
+          path="/projects/:projectId/decomptes"
+          element={
+            user ? (
+              <Layout>
+                <DecompteListPage />
+              </Layout>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        
+        <Route
+          path="/projects/:projectId/decompte/:periodeId"
+          element={
+            user ? (
+              <Layout>
+                <PeriodeDecomptePage />
+              </Layout>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        
+        {/* Legacy routes - redirect to new pages */}
+        <Route
+          path="/projects/:projectId/periodes"
+          element={
+            user ? (
+              <Navigate to={`/projects/${window.location.pathname.split('/')[2]}/metre`} replace />
             ) : (
               <Navigate to="/login" replace />
             )
@@ -210,6 +311,20 @@ function App() {
         
         <Route
           path="/projects/:projectId/periodes/:periodeId/attachement"
+          element={
+            user ? (
+              <Layout>
+                <AttachementPage />
+              </Layout>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        
+        {/* New direct attachement route */}
+        <Route
+          path="/projects/:projectId/attachement"
           element={
             user ? (
               <Layout>

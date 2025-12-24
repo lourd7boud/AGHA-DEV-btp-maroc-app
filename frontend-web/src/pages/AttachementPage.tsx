@@ -1,27 +1,29 @@
 import { FC, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/database';
+import { db, Periode } from '../db/database';
 import { ArrowLeft, Download, FileText } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 const AttachementPage: FC = () => {
-  const { projectId: rawProjectId, periodeId: rawPeriodeId } = useParams<{ projectId: string; periodeId: string }>();
+  const { projectId: rawProjectId, periodeId: rawPeriodeId } = useParams<{ projectId: string; periodeId?: string }>();
   const navigate = useNavigate();
   const [isExporting, setIsExporting] = useState(false);
 
   // Normalize IDs - ensure they have the correct prefix
   const projectId = rawProjectId?.includes(':') ? rawProjectId : `project:${rawProjectId}`;
-  const periodeId = rawPeriodeId?.includes(':') ? rawPeriodeId : `periode:${rawPeriodeId}`;
+  const periodeId = rawPeriodeId 
+    ? (rawPeriodeId.includes(':') ? rawPeriodeId : `periode:${rawPeriodeId}`)
+    : null;
 
   const project = useLiveQuery(
     () => db.projects.get(projectId),
     [projectId]
   );
 
-  const periode = useLiveQuery(
-    () => db.periodes.get(periodeId),
+  const periode = useLiveQuery<Periode | undefined>(
+    async () => periodeId ? await db.periodes.get(periodeId) : undefined,
     [periodeId]
   );
 
@@ -34,15 +36,33 @@ const AttachementPage: FC = () => {
     [projectId]
   );
 
-  // Récupérer les métrés de cette période
+  // Récupérer les métrés - soit par période, soit tous les métrés du projet
   const metres = useLiveQuery(
-    () => db.metres
-      .where('periodeId')
-      .equals(periodeId)
-      .and((m) => !m.deletedAt)
-      .toArray(),
-    [periodeId]
+    () => {
+      if (periodeId) {
+        // Mode période: métrés de cette période uniquement
+        return db.metres
+          .where('periodeId')
+          .equals(periodeId)
+          .and((m) => !m.deletedAt)
+          .toArray();
+      } else {
+        // Mode projet: tous les métrés du projet
+        return db.metres
+          .where('projectId')
+          .equals(projectId)
+          .and((m) => !m.deletedAt)
+          .toArray();
+      }
+    },
+    [periodeId, projectId]
   );
+
+  // Helper to normalize bordereauLigneId (remove prefix if present)
+  const normalizeBordereauLigneId = (id: string): string => {
+    if (!id) return '';
+    return id.replace(/^bordereau:/, '');
+  };
 
   // Préparer les données pour l'attachement (cumul des quantités)
   const getAttachementData = () => {
@@ -50,17 +70,29 @@ const AttachementPage: FC = () => {
 
     return bordereau.lignes.map((ligne, index) => {
       // Trouver le métré correspondant à cette ligne du bordereau
-      const bordereauLigneId = `${bordereau.id}-ligne-${ligne.numero}`;
-      const metre = metres.find(m => m.bordereauLigneId === bordereauLigneId);
+      // Support both with and without prefix
+      const cleanBordereauId = normalizeBordereauLigneId(bordereau.id);
+      const ligneId = `${cleanBordereauId}-ligne-${ligne.numero}`;
       
-      // Utiliser totalCumule ou calculer depuis les lignes
-      const quantiteCumulee = metre?.totalCumule || 0;
+      // Find metre matching this line (compare normalized IDs)
+      const metre = metres.find(m => {
+        const metreLineId = normalizeBordereauLigneId(m.bordereauLigneId);
+        return metreLineId === ligneId;
+      });
+      
+      // Utiliser totalCumule ou calculer depuis les lignes - ensure it's a number
+      let quantiteCumulee = 0;
+      if (metre?.totalCumule !== undefined && metre?.totalCumule !== null) {
+        quantiteCumulee = Number(metre.totalCumule) || 0;
+      } else if (metre?.lignes && Array.isArray(metre.lignes)) {
+        quantiteCumulee = metre.lignes.reduce((sum, l) => sum + (Number(l.partiel) || 0), 0);
+      }
       
       return {
         numero: index + 1,
         designation: ligne.designation,
         unite: ligne.unite || '',
-        quantiteCumulee,
+        quantiteCumulee: Number(quantiteCumulee) || 0,
       };
     }).filter(item => item.quantiteCumulee > 0); // Afficher seulement les lignes avec des quantités
   };
@@ -68,7 +100,7 @@ const AttachementPage: FC = () => {
   const attachementData = getAttachementData();
 
   const exportToPDF = async () => {
-    if (!project || !periode || !bordereau) return;
+    if (!project || !bordereau) return;
     
     setIsExporting(true);
     
@@ -127,7 +159,7 @@ const AttachementPage: FC = () => {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
       const typeMarche = (project as any).typeProjet === 'negocie' ? 'MARCHE NEGOCIE' : 'MARCHE';
-      doc.text(`${typeMarche} N°${project.marcheNo}-DPA-TA`, pageWidth / 2, yPos, { align: 'center' });
+      doc.text(`${typeMarche} N°${project.marcheNo}`, pageWidth / 2, yPos, { align: 'center' });
       
       // Objet du marché (en majuscules, gras)
       yPos += 8;
@@ -145,8 +177,13 @@ const AttachementPage: FC = () => {
       yPos += 6;
       doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
-      const attachementSuffix = periode.isDecompteDernier ? ' et dernier' : '';
-      doc.text(`ATTACHEMENT PROVISOIRE  N°${periode.numero.toString().padStart(2, '0')}${attachementSuffix}`, pageWidth / 2, yPos, { align: 'center' });
+      if (periode) {
+        const attachementSuffix = periode.isDecompteDernier ? ' et dernier' : '';
+        doc.text(`ATTACHEMENT PROVISOIRE  N°${periode.numero.toString().padStart(2, '0')}${attachementSuffix}`, pageWidth / 2, yPos, { align: 'center' });
+      } else {
+        // Sans période, juste "ATTACHEMENT"
+        doc.text('ATTACHEMENT DES TRAVAUX', pageWidth / 2, yPos, { align: 'center' });
+      }
       
       // Ligne de séparation
       yPos += 4;
@@ -160,7 +197,7 @@ const AttachementPage: FC = () => {
         item.numero.toString(),
         item.designation,
         item.unite,
-        item.quantiteCumulee.toFixed(2)
+        Number(item.quantiteCumulee).toFixed(2)
       ]);
       
       autoTable(doc, {
@@ -229,7 +266,9 @@ const AttachementPage: FC = () => {
       });
       
       // Sauvegarder
-      const fileName = `Attachement_${project.marcheNo}_P${periode.numero}.pdf`;
+      const fileName = periode 
+        ? `Attachement_${project.marcheNo}_P${periode.numero}.pdf`
+        : `Attachement_${project.marcheNo}.pdf`;
       doc.save(fileName);
       
     } catch (error) {
@@ -266,7 +305,10 @@ const AttachementPage: FC = () => {
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 mb-1">
-              Attachement Provisoire N° {periode.numero.toString().padStart(2, '0')}{periode.isDecompteDernier ? ' et dernier' : ''}
+              {periode 
+                ? `Attachement Provisoire N° ${periode.numero.toString().padStart(2, '0')}${periode.isDecompteDernier ? ' et dernier' : ''}`
+                : 'Attachement des Travaux'
+              }
             </h1>
             <p className="text-gray-600">Marché N° {project.marcheNo} - {project.annee}</p>
             <p className="text-sm text-gray-500 mt-1">{project.objet}</p>
@@ -304,7 +346,7 @@ const AttachementPage: FC = () => {
           <p className="text-sm text-gray-600 mb-4">Direction Provinciale de l'Agriculture de Tata</p>
           
           <p className="font-bold text-sm mb-2">
-            {(project as any).typeProjet === 'negocie' ? 'MARCHE NEGOCIE' : 'MARCHE'} N°{project.marcheNo}-DPA-TA
+            {(project as any).typeProjet === 'negocie' ? 'MARCHE NEGOCIE' : 'MARCHE'} N°{project.marcheNo}
           </p>
           
           <p className="text-sm font-semibold text-gray-800 mb-4 px-8">
@@ -312,7 +354,10 @@ const AttachementPage: FC = () => {
           </p>
           
           <h3 className="text-lg font-bold border-t border-b py-2 inline-block px-8">
-            ATTACHEMENT PROVISOIRE N°{periode.numero.toString().padStart(2, '0')}{periode.isDecompteDernier ? ' et dernier' : ''}
+            {periode 
+              ? `ATTACHEMENT PROVISOIRE N°${periode.numero.toString().padStart(2, '0')}${periode.isDecompteDernier ? ' et dernier' : ''}`
+              : 'ATTACHEMENT DES TRAVAUX'
+            }
           </h3>
         </div>
 
@@ -335,7 +380,7 @@ const AttachementPage: FC = () => {
                     <td className="border border-gray-400 px-4 py-2">{item.designation}</td>
                     <td className="border border-gray-400 px-4 py-2 text-center">{item.unite}</td>
                     <td className="border border-gray-400 px-4 py-2 text-right font-medium">
-                      {item.quantiteCumulee.toFixed(2)}
+                      {Number(item.quantiteCumulee).toFixed(2)}
                     </td>
                   </tr>
                 ))}

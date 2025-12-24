@@ -46,7 +46,7 @@ const REALTIME_CONFIG = {
   RECONNECT_ATTEMPTS_MAX: 10,
   HEARTBEAT_INTERVAL: 25000,      // 25 seconds
   SERVER_SEQ_KEY: 'realtime-server-seq',
-  FALLBACK_POLL_INTERVAL: 5000,   // 5 seconds
+  FALLBACK_POLL_INTERVAL: 3000,   // 3 seconds - fast polling when WebSocket fails
 };
 
 // ==================== SOCKET SERVICE ====================
@@ -67,6 +67,7 @@ class RealtimeSyncService {
   private token: string | null = null;
   private deviceId: string | null = null;
   private userId: string | null = null;
+  private serverUrl: string | null = null;
   private subscribedProjects: Set<string> = new Set();
 
   constructor() {
@@ -86,6 +87,7 @@ class RealtimeSyncService {
     this.token = token;
     this.deviceId = deviceId;
     this.userId = userId;
+    this.serverUrl = serverUrl.replace(/\/api\/?$/, ''); // Store base URL without /api
 
     if (this.socket?.connected) {
       console.log('🔌 Already connected to realtime server');
@@ -417,7 +419,11 @@ class RealtimeSyncService {
     if (!this.token) return;
 
     try {
-      const response = await fetch(`/api/sync/pull?since=${this.state.serverSeq}&deviceId=${this.deviceId}`, {
+      // Use stored server URL for cross-origin requests (e.g., Electron)
+      const baseUrl = this.serverUrl || '';
+      const pollUrl = `${baseUrl}/api/sync/pull?since=${this.state.serverSeq}&deviceId=${this.deviceId}`;
+      
+      const response = await fetch(pollUrl, {
         headers: {
           Authorization: `Bearer ${this.token}`,
         },

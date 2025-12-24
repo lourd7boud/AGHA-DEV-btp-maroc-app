@@ -102,6 +102,109 @@ const ProjectDetailPage: FC = () => {
     [id]
   );
 
+  // Aggregated metres: group by bordereauLigneId, show each article once
+  // Qté Partielle = quantity from the latest période's metre
+  // Qté Cumulée = sum of all quantities from all périodes
+  const aggregatedMetres = useLiveQuery(
+    async () => {
+      // Get all metres for this project
+      let allMetres = await db.metres.where('projectId').equals(projectId).and((m) => !m.deletedAt).toArray();
+      if (allMetres.length === 0) {
+        allMetres = await db.metres.where('projectId').equals(rawId!).and((m) => !m.deletedAt).toArray();
+      }
+      if (allMetres.length === 0) return [];
+
+      // Get all périodes to determine which is the latest
+      let allPeriodes = await db.periodes.where('projectId').equals(projectId).and((p) => !p.deletedAt).toArray();
+      if (allPeriodes.length === 0) {
+        allPeriodes = await db.periodes.where('projectId').equals(rawId!).and((p) => !p.deletedAt).toArray();
+      }
+
+      // Sort périodes by numero descending to find the latest
+      const sortedPeriodes = allPeriodes.sort((a, b) => b.numero - a.numero);
+      const latestPeriodeId = sortedPeriodes.length > 0 ? sortedPeriodes[0].id : null;
+
+      // Helper to normalize bordereauLigneId (remove projectId prefix if present)
+      const normalizeBordereauLigneId = (id: string): string => {
+        if (id.includes('_')) {
+          const parts = id.split('_');
+          return parts[parts.length - 1]; // Get the last part (Lxx)
+        }
+        return id;
+      };
+
+      // Group metres by normalized bordereauLigneId
+      const groupedMap = new Map<string, {
+        reference: string;
+        designationBordereau: string;
+        unite: string;
+        quantiteBordereau: number;
+        totalCumule: number;
+        totalPartiel: number;
+        pourcentageRealisation: number;
+        latestMetre: typeof allMetres[0] | null;
+      }>();
+
+      for (const metre of allMetres) {
+        const normalizedId = normalizeBordereauLigneId(metre.bordereauLigneId);
+        
+        const existing = groupedMap.get(normalizedId);
+        if (existing) {
+          // Add to cumulative total
+          existing.totalCumule += metre.totalPartiel || 0;
+          // Check if this is from the latest période
+          if (metre.periodeId === latestPeriodeId) {
+            existing.totalPartiel = metre.totalPartiel || 0;
+            existing.latestMetre = metre;
+          }
+        } else {
+          groupedMap.set(normalizedId, {
+            reference: metre.reference,
+            designationBordereau: metre.designationBordereau,
+            unite: metre.unite,
+            quantiteBordereau: metre.quantiteBordereau,
+            totalCumule: metre.totalPartiel || 0,
+            totalPartiel: metre.periodeId === latestPeriodeId ? (metre.totalPartiel || 0) : 0,
+            pourcentageRealisation: 0, // Will calculate after
+            latestMetre: metre.periodeId === latestPeriodeId ? metre : null,
+          });
+        }
+      }
+
+      // Convert to array and calculate pourcentageRealisation
+      const result = Array.from(groupedMap.entries()).map(([normalizedId, data]) => {
+        const qtyBordereau = Number(data.quantiteBordereau) || 0;
+        const totalCumule = Number(data.totalCumule) || 0;
+        const pourcentage = qtyBordereau > 0 
+          ? (totalCumule / qtyBordereau) * 100 
+          : 0;
+        // Extract just the line number from reference (e.g., "METRE-P1-L1" -> "L1")
+        const refParts = data.reference.split('-');
+        const cleanRef = refParts.length > 0 ? refParts[refParts.length - 1] : data.reference;
+        return {
+          id: normalizedId,
+          reference: cleanRef,
+          designationBordereau: data.designationBordereau,
+          unite: data.unite,
+          quantiteBordereau: qtyBordereau,
+          totalPartiel: Number(data.totalPartiel) || 0,
+          totalCumule: totalCumule,
+          pourcentageRealisation: isNaN(pourcentage) ? 0 : pourcentage,
+        };
+      });
+
+      // Sort by reference (L1, L2, L3, etc.)
+      result.sort((a, b) => {
+        const numA = parseInt(a.reference.replace(/\D/g, '')) || 0;
+        const numB = parseInt(b.reference.replace(/\D/g, '')) || 0;
+        return numA - numB;
+      });
+
+      return result;
+    },
+    [id]
+  );
+
   const decompts = useLiveQuery(
     async () => {
       const withPrefix = await db.decompts.where('projectId').equals(projectId).and((d) => !d.deletedAt).toArray();
@@ -264,8 +367,7 @@ const ProjectDetailPage: FC = () => {
   const tabs = [
     { id: 'overview', label: 'Vue d\'ensemble', icon: FolderKanban, count: null },
     { id: 'bordereau', label: 'Bordereau', icon: FileText, count: bordereaux && bordereaux.length > 0 ? 1 : 0 },
-    { id: 'periodes', label: 'Périodes', icon: Calendar, count: null },
-    { id: 'metre', label: 'Métré', icon: TrendingUp, count: metres?.length || 0 },
+    { id: 'metre', label: 'Métré', icon: TrendingUp, count: aggregatedMetres?.length || 0 },
     { id: 'decompt', label: 'Décompte', icon: DollarSign, count: decompts?.length || 0 },
     { id: 'photos', label: 'Photos', icon: Image, count: photos?.length || 0 },
     { id: 'pv', label: 'PV', icon: FileText, count: pvs?.length || 0 },
@@ -761,24 +863,7 @@ const ProjectDetailPage: FC = () => {
           </>
         )}
 
-        {activeTab === 'periodes' && (
-          <div className="card">
-            <div className="text-center py-12">
-              <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Gestion des périodes</h3>
-              <p className="text-gray-600 mb-4">
-                Organisez vos métrés et décomptes par période
-              </p>
-              <button
-                onClick={() => navigate(`/projects/${id}/periodes`)}
-                className="btn btn-primary inline-flex items-center gap-2"
-              >
-                <Calendar className="w-4 h-4" />
-                Gérer les périodes
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Périodes tab removed - redirects to Métré */}
 
         {activeTab === 'metre' && (
           <>
@@ -786,16 +871,25 @@ const ProjectDetailPage: FC = () => {
               <div className="card">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-lg font-semibold text-gray-900">Métrés du projet</h3>
-                  <button
-                    onClick={() => navigate(`/projects/${id}/metre`)}
-                    className="btn btn-primary inline-flex items-center gap-2"
-                  >
-                    <TrendingUp className="w-4 h-4" />
-                    Gérer les métrés
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => navigate(`/projects/${id}/metre-v3`)}
+                      className="btn btn-secondary inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600 border-0"
+                    >
+                      <TrendingUp className="w-4 h-4" />
+                      Métré V3 (Hiérarchique)
+                    </button>
+                    <button
+                      onClick={() => navigate(`/projects/${id}/metre`)}
+                      className="btn btn-primary inline-flex items-center gap-2"
+                    >
+                      <TrendingUp className="w-4 h-4" />
+                      Gérer les métrés
+                    </button>
+                  </div>
                 </div>
 
-                {metres && metres.length > 0 ? (
+                {aggregatedMetres && aggregatedMetres.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead className="bg-gray-50 border-b-2 border-gray-200">
@@ -809,7 +903,7 @@ const ProjectDetailPage: FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
-                        {metres.map((metre) => (
+                        {aggregatedMetres.map((metre) => (
                           <tr key={metre.id} className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-gray-700">{metre.reference}</td>
                             <td className="px-4 py-3 text-gray-900">{metre.designationBordereau}</td>
@@ -819,10 +913,10 @@ const ProjectDetailPage: FC = () => {
                               </span>
                             </td>
                             <td className="px-4 py-3 text-right font-medium text-gray-900">
-                              {metre.totalPartiel.toFixed(2)}
+                              {Number(metre.totalPartiel || 0).toFixed(2)}
                             </td>
                             <td className="px-4 py-3 text-right font-medium text-primary-600">
-                              {metre.totalCumule.toFixed(2)}
+                              {Number(metre.totalCumule || 0).toFixed(2)}
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
@@ -841,7 +935,7 @@ const ProjectDetailPage: FC = () => {
                                   />
                                 </div>
                                 <span className="text-xs font-medium text-gray-700 w-12 text-right">
-                                  {metre.pourcentageRealisation.toFixed(0)}%
+                                  {Number(metre.pourcentageRealisation || 0).toFixed(0)}%
                                 </span>
                               </div>
                             </td>
@@ -902,7 +996,7 @@ const ProjectDetailPage: FC = () => {
                       <div
                         key={decompt.id}
                         className="card hover:shadow-md transition-shadow cursor-pointer"
-                        onClick={() => navigate(`/projects/${id}/periodes/${decompt.periodeId.replace('periode:', '')}/decompte`)}
+                        onClick={() => navigate(`/projects/${id}/decompte`)}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-4">
@@ -968,14 +1062,14 @@ const ProjectDetailPage: FC = () => {
                   <DollarSign className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">Aucun décompte</h3>
                   <p className="text-gray-600 mb-4">
-                    Créez des périodes puis des décomptes pour facturer les travaux exécutés
+                    Créez des métrés puis générez le décompte pour facturer les travaux exécutés
                   </p>
                   <button 
-                    onClick={() => setActiveTab('periodes')}
+                    onClick={() => navigate(`/projects/${id}/decompte`)}
                     className="btn btn-primary inline-flex items-center gap-2"
                   >
-                    <Calendar className="w-4 h-4" />
-                    Voir les périodes
+                    <DollarSign className="w-4 h-4" />
+                    Créer un décompte
                   </button>
                 </div>
               </div>
