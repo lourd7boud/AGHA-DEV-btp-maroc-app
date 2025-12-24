@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- Development workflow documentation (CONTRIBUTING.md)
+- Staging environment configuration
+- Docker Compose for staging
+
+### Fixed
+<!-- Add bug fixes here as you work -->
+
+### Changed
+<!-- Add changes here -->
+
+---
+
 ## [1.0.0] - 2025-12-24
 
 ### 🎉 Initial Production Release
