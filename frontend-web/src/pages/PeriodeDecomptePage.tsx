@@ -19,9 +19,22 @@ import { v4 as uuidv4 } from 'uuid';
 import { logSyncOperation } from '../services/syncService';
 import { generateDecomptePDF } from '../utils/decomptePdfExport';
 
-// Fonction de majoration (arrondi vers le haut) à 2 décimales
+// Fonction d'arrondi comptable standard à 2 décimales
+// FIX v1.0.1: Changé de Math.ceil à Math.round pour éviter les majorations non justifiées
+// Math.round: arrondi au plus proche (0.005 → 0.01, 0.004 → 0.00)
+// Utilisé pour TVA et tous les montants comptables
 const majoration = (value: number): number => {
-  return Math.ceil(value * 100) / 100;
+  return Math.round(value * 100) / 100;
+};
+
+// Fonction de formatage monétaire - garantit exactement 2 décimales
+// Utilisée pour l'affichage de tous les montants (TVA, HT, TTC)
+const formatMontant = (value: number): string => {
+  const rounded = Math.round(value * 100) / 100;
+  return rounded.toLocaleString('fr-MA', { 
+    minimumFractionDigits: 2, 
+    maximumFractionDigits: 2 
+  });
 };
 
 interface DecompteLigne {
@@ -569,7 +582,8 @@ const PeriodeDecomptePage: FC = () => {
                   const montantTTC = montantHT * 1.2; // +20% TVA
                   return sum + montantTTC;
                 }, 0)
-                .toLocaleString('fr-MA', { minimumFractionDigits: 2 })}{' '}
+                .toFixed(2)
+                .replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}{' '}
               DH
             </p>
           </div>
@@ -597,7 +611,7 @@ const PeriodeDecomptePage: FC = () => {
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">
-                {totalHT.toLocaleString('fr-MA', { maximumFractionDigits: 2 })}
+                {formatMontant(totalHT)}
               </p>
               <p className="text-sm text-gray-600">Total HT (DH)</p>
             </div>
@@ -611,7 +625,7 @@ const PeriodeDecomptePage: FC = () => {
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">
-                {totalTTC.toLocaleString('fr-MA', { maximumFractionDigits: 2 })}
+                {formatMontant(totalTTC)}
               </p>
               <p className="text-sm text-gray-600">Total TTC (DH)</p>
             </div>
@@ -625,7 +639,7 @@ const PeriodeDecomptePage: FC = () => {
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">
-                {recap.montantAcompte.toLocaleString('fr-MA', { maximumFractionDigits: 2 })}
+                {formatMontant(recap.montantAcompte)}
               </p>
               <p className="text-sm text-gray-600">À payer (DH)</p>
             </div>
@@ -675,13 +689,13 @@ const PeriodeDecomptePage: FC = () => {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-gray-700 border-r border-gray-200">
-                    {ligne.quantiteRealisee.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                    {formatMontant(ligne.quantiteRealisee)}
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-gray-700 border-r border-gray-200">
-                    {ligne.prixUnitaireHT.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                    {formatMontant(ligne.prixUnitaireHT)}
                   </td>
                   <td className="px-4 py-3 text-right font-bold text-gray-900">
-                    {ligne.montantHT.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                    {formatMontant(ligne.montantHT)}
                   </td>
                 </tr>
               ))}
@@ -692,7 +706,7 @@ const PeriodeDecomptePage: FC = () => {
                   Total Général Hors TVA
                 </td>
                 <td className="px-4 py-3 text-right font-bold text-xl text-primary-600">
-                  {totalHT.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                  {formatMontant(totalHT)}
                 </td>
               </tr>
               <tr>
@@ -700,7 +714,7 @@ const PeriodeDecomptePage: FC = () => {
                   Total TVA ({tauxTVA}%)
                 </td>
                 <td className="px-4 py-3 text-right font-bold text-xl text-primary-600">
-                  {montantTVA.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                  {formatMontant(montantTVA)}
                 </td>
               </tr>
               <tr className="bg-primary-50">
@@ -708,7 +722,7 @@ const PeriodeDecomptePage: FC = () => {
                   Total Général (T.T.C)
                 </td>
                 <td className="px-4 py-3 text-right font-bold text-2xl text-primary-600">
-                  {totalTTC.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                  {formatMontant(totalTTC)}
                 </td>
               </tr>
             </tfoot>
@@ -741,13 +755,13 @@ const PeriodeDecomptePage: FC = () => {
               <tr>
                 <td className="px-4 py-3 text-gray-900 border-r border-gray-200">Travaux terminés</td>
                 <td className="px-4 py-3 text-right font-medium text-gray-700 border-r border-gray-200">
-                  {recap.travauxTermines.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                  {formatMontant(recap.travauxTermines)}
                 </td>
                 <td className="px-4 py-3 text-right font-medium text-gray-700 border-r border-gray-200">
-                  {periode?.isDecompteDernier ? recap.retenueGarantie.toLocaleString('fr-MA', { minimumFractionDigits: 2 }) : ''}
+                  {periode?.isDecompteDernier ? formatMontant(recap.retenueGarantie) : ''}
                 </td>
                 <td className="px-4 py-3 text-right font-medium text-gray-700">
-                  {periode?.isDecompteDernier ? (recap.travauxTermines - recap.retenueGarantie).toLocaleString('fr-MA', { minimumFractionDigits: 2 }) : ''}
+                  {periode?.isDecompteDernier ? formatMontant(recap.travauxTermines - recap.retenueGarantie) : ''}
                 </td>
               </tr>
               <tr>
@@ -755,15 +769,13 @@ const PeriodeDecomptePage: FC = () => {
                   Travaux non terminés
                 </td>
                 <td className="px-4 py-3 text-right font-medium text-gray-700 border-r border-gray-200">
-                  {recap.travauxNonTermines.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                  {formatMontant(recap.travauxNonTermines)}
                 </td>
                 <td className="px-4 py-3 text-right font-medium text-gray-700 border-r border-gray-200">
-                  {!periode?.isDecompteDernier ? recap.retenueGarantie.toLocaleString('fr-MA', { minimumFractionDigits: 2 }) : ''}
+                  {!periode?.isDecompteDernier ? formatMontant(recap.retenueGarantie) : ''}
                 </td>
                 <td className="px-4 py-3 text-right font-medium text-gray-700">
-                  {!periode?.isDecompteDernier ? (recap.travauxNonTermines - recap.retenueGarantie).toLocaleString('fr-MA', {
-                    minimumFractionDigits: 2,
-                  }) : ''}
+                  {!periode?.isDecompteDernier ? formatMontant(recap.travauxNonTermines - recap.retenueGarantie) : ''}
                 </td>
               </tr>
               <tr>
@@ -777,15 +789,13 @@ const PeriodeDecomptePage: FC = () => {
               <tr className="bg-gray-50">
                 <td className="px-4 py-3 text-gray-900 font-bold border-r border-gray-200">TOTAUX</td>
                 <td className="px-4 py-3 text-right font-bold text-gray-900 border-r border-gray-200">
-                  {recap.totalAvantRetenue.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                  {formatMontant(recap.totalAvantRetenue)}
                 </td>
                 <td className="px-4 py-3 text-right font-bold text-gray-900 border-r border-gray-200">
-                  {recap.retenueGarantie.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                  {formatMontant(recap.retenueGarantie)}
                 </td>
                 <td className="px-4 py-3 text-right font-bold text-gray-900">
-                  {(recap.totalAvantRetenue - recap.retenueGarantie).toLocaleString('fr-MA', {
-                    minimumFractionDigits: 2,
-                  })}
+                  {formatMontant(recap.totalAvantRetenue - recap.retenueGarantie)}
                 </td>
               </tr>
               <tr className="bg-gray-50">
@@ -796,7 +806,7 @@ const PeriodeDecomptePage: FC = () => {
                   À déduire les dépenses imputées sur exercices antérieurs
                 </td>
                 <td className="px-4 py-3 text-right font-medium text-gray-700">
-                  {recap.depensesExercicesAnterieurs.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                  {formatMontant(recap.depensesExercicesAnterieurs)}
                 </td>
               </tr>
               <tr>
@@ -807,7 +817,7 @@ const PeriodeDecomptePage: FC = () => {
                   Reste à payer sur l'exercice en cours
                 </td>
                 <td className="px-4 py-3 text-right font-bold text-gray-900">
-                  {recap.resteAPayer.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                  {formatMontant(recap.resteAPayer)}
                 </td>
               </tr>
               <tr>
@@ -818,7 +828,7 @@ const PeriodeDecomptePage: FC = () => {
                   À déduire le montant des acomptes délivrés sur l'exercice en cours
                 </td>
                 <td className="px-4 py-3 text-right font-medium text-gray-700">
-                  {decomptesPrecedents.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                  {formatMontant(decomptesPrecedents)}
                 </td>
               </tr>
               <tr className="bg-primary-50">
@@ -829,7 +839,7 @@ const PeriodeDecomptePage: FC = () => {
                   Montant de l'acompte à délivrer:
                 </td>
                 <td className="px-4 py-3 text-right font-bold text-2xl text-primary-600">
-                  {recap.montantAcompte.toLocaleString('fr-MA', { minimumFractionDigits: 2 })}
+                  {formatMontant(recap.montantAcompte)}
                 </td>
               </tr>
             </tbody>

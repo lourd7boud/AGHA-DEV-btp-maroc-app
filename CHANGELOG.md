@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker Compose for staging
 
 ### Fixed
-<!-- Add bug fixes here as you work -->
+- TVA (20%) rounding issue in Décompte page - changed from Math.ceil (majoration) to Math.round (standard accounting rounding)
+- All monetary values now display with exactly 2 decimals in Décompte page and PDF export
+- Consistent formatting across web interface and PDF output
 
 ### Changed
 <!-- Add changes here -->

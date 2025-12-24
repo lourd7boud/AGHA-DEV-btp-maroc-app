@@ -133,6 +133,15 @@ function numberToWords(num: number): string {
   return result;
 }
 
+// Helper function for consistent 2-decimal rounding (standard accounting rounding)
+function formatMontant(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  return rounded.toLocaleString('fr-MA', { 
+    minimumFractionDigits: 2, 
+    maximumFractionDigits: 2 
+  });
+}
+
 export async function generateDecomptePDF(
   project: Project,
   periode: Periode,
@@ -143,7 +152,8 @@ export async function generateDecomptePDF(
   totalHT: number,
   montantTVA: number,
   totalTTC: number,
-  decomptsPrecedents: DecomptePrecedent[] = []
+  decomptsPrecedents: DecomptePrecedent[] = [],
+  printDirectly: boolean = false // خيار الطباعة المباشرة
 ): Promise<void> {
   const doc = new jsPDF('portrait', 'mm', 'a4');
   const pageWidth = doc.internal.pageSize.width;
@@ -208,37 +218,53 @@ export async function generateDecomptePDF(
 
   yPos += 5;
 
-  // Informations société et montant
+  // Informations société (afficher seulement les champs remplis)
   doc.setFontSize(9);
-  doc.text('Société: ' + (project.societe || 'SOUS ISKE TRAVAUX DIVERS(SARL)'), 10, yPos);
-  yPos += 5;
+  doc.setFont('helvetica', 'normal');
   
-  const rcYPos = yPos;
-  doc.text('R. C. n°: ' + (project.rc || '217/2021'), 10, yPos);
+  // Position de départ pour les infos société
+  const societeStartY = yPos;
   
-  // Montant de l'acompte (dans un cadre)
+  // Afficher seulement les champs qui ont des valeurs
+  if (project.societe) {
+    doc.text('Société: ' + project.societe, 10, yPos);
+    yPos += 5;
+  }
+  if (project.rc) {
+    doc.text('R. C. n°: ' + project.rc, 10, yPos);
+    yPos += 5;
+  }
+  if (project.cb) {
+    doc.text('C.B n°: ' + project.cb, 10, yPos);
+    yPos += 5;
+  }
+  if (project.cnss) {
+    doc.text('C.N.S.S. n°: ' + project.cnss, 10, yPos);
+    yPos += 5;
+  }
+  if (project.patente) {
+    doc.text('Patente: ' + project.patente, 10, yPos);
+    yPos += 5;
+  }
+  
+  // Montant de l'acompte (dans un cadre) - positionné à droite au niveau du début des infos société
   const montantBoxX = pageWidth - 70;
   const montantBoxWidth = 60;
   const montantBoxHeight = 12;
-  doc.rect(montantBoxX, rcYPos - 4, montantBoxWidth, montantBoxHeight);
+  doc.rect(montantBoxX, societeStartY - 4, montantBoxWidth, montantBoxHeight);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.text('Montant de l\'acompte en Dhs:', montantBoxX + montantBoxWidth / 2, rcYPos, { align: 'center' });
+  doc.text('Montant de l\'acompte en Dhs:', montantBoxX + montantBoxWidth / 2, societeStartY, { align: 'center' });
   
   doc.setFontSize(10);
-  doc.text(recap.montantAcompte.toLocaleString('fr-MA', { minimumFractionDigits: 2 }), montantBoxX + montantBoxWidth / 2, rcYPos + 5, { align: 'center' });
+  doc.text(formatMontant(recap.montantAcompte), montantBoxX + montantBoxWidth / 2, societeStartY + 5, { align: 'center' });
   
-  yPos += 5;
-
-  // CB, CNSS, Patente
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text('C.B n°: ' + (project.cb || '007550604987600000228218'), 10, yPos);
-  yPos += 5;
-  doc.text('C.N.S.S. n°: ' + (project.cnss || '4444634'), 10, yPos);
-  yPos += 5;
-  doc.text('Patente: ' + (project.patente || '47730296'), 10, yPos);
-  yPos += 10;
+  // Ajouter un espacement si aucune info société n'a été affichée
+  if (yPos === societeStartY) {
+    yPos += 10;
+  } else {
+    yPos += 5;
+  }
 
   // DECOMPTE PROVISOIRE N°
   doc.setFont('helvetica', 'bold');
@@ -276,15 +302,15 @@ export async function generateDecomptePDF(
       [
        { content: '', colSpan: 3, styles: { halign: 'left' } },
        { content: 'Total Général Hors TVA', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } }, 
-       { content: totalHT.toLocaleString('fr-MA', { minimumFractionDigits: 2 }), styles: { halign: 'right', fontStyle: 'bold' } }],
+       { content: formatMontant(totalHT), styles: { halign: 'right', fontStyle: 'bold' } }],
       [
        { content: '', colSpan: 3, styles: { halign: 'left' } },
        { content: `Total TVA (${tauxTVA}%)`, colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } },
-       { content: montantTVA.toLocaleString('fr-MA', { minimumFractionDigits: 2 }), styles: { halign: 'right', fontStyle: 'bold' } }],
+       { content: formatMontant(montantTVA), styles: { halign: 'right', fontStyle: 'bold' } }],
       [
        { content: '', colSpan: 3, styles: { halign: 'left' } },
        { content: 'Total Général (T.T.C)', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } },
-       { content: totalTTC.toLocaleString('fr-MA', { minimumFractionDigits: 2 }), styles: { halign: 'right', fontStyle: 'bold' } }],
+       { content: formatMontant(totalTTC), styles: { halign: 'right', fontStyle: 'bold' } }],
     ],
     theme: 'grid',
     styles: { fontSize: 8, cellPadding: 2 },
@@ -384,7 +410,7 @@ export async function generateDecomptePDF(
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
       const dpSuffix = dp.isDecompteDernier ? ' et dernier' : '';
-      const dpText = `D.P.n° ${dp.numero}${dpSuffix} du ${dp.date} montant: ${dp.montant.toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DH`;
+      const dpText = `D.P.n° ${dp.numero}${dpSuffix} du ${dp.date} montant: ${formatMontant(dp.montant)} DH`;
       console.log('📄 PDF - Ligne:', dpText);
       doc.text(dpText, 10, yPos);
       yPos += 5;
@@ -395,7 +421,7 @@ export async function generateDecomptePDF(
   
   // Afficher le décompte actuel en dernier
   const dpSuffixActuel = periode.isDecompteDernier ? ' et dernier' : '';
-  const dpLine = `D.P.n° ${periode.numero}${dpSuffixActuel} du ${new Date(periode.dateFin).toLocaleDateString('fr-FR')} montant: ${recap.montantAcompte.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} DH`;
+  const dpLine = `D.P.n° ${periode.numero}${dpSuffixActuel} du ${new Date(periode.dateFin).toLocaleDateString('fr-FR')} montant: ${formatMontant(recap.montantAcompte)} DH`;
   doc.text(dpLine, 10, yPos);
   yPos += 9;
 
@@ -409,13 +435,13 @@ export async function generateDecomptePDF(
   const recapData = periode.isDecompteDernier ? [
     // Décompte dernier: tout dans Travaux terminés
     ['Travaux terminés', recap.travauxTermines.toFixed(2), recap.retenueGarantie.toFixed(2), (recap.travauxTermines - recap.retenueGarantie).toFixed(2)],
-    ['Travaux non terminés', '0,00', '', ''],
-    ['Approvisionnements', recap.approvisionnements.toFixed(2), '', ''],
+    ['Travaux non terminés', '0.00', '0.00', '0.00'],
+    ['Approvisionnements', recap.approvisionnements.toFixed(2), '0.00', recap.approvisionnements.toFixed(2)],
   ] : [
     // Décompte normal: tout dans Travaux non terminés
-    ['Travaux terminés', recap.travauxTermines.toFixed(2), '', ''],
+    ['Travaux terminés', recap.travauxTermines.toFixed(2), '0.00', '0.00'],
     ['Travaux non terminés', recap.travauxNonTermines.toFixed(2), recap.retenueGarantie.toFixed(2), (recap.travauxNonTermines - recap.retenueGarantie).toFixed(2)],
-    ['Approvisionnements', recap.approvisionnements.toFixed(2), '', ''],
+    ['Approvisionnements', recap.approvisionnements.toFixed(2), '0.00', recap.approvisionnements.toFixed(2)],
   ];
 
   autoTable(doc, {
@@ -507,7 +533,38 @@ export async function generateDecomptePDF(
   yPos += 10;
   doc.text('Tata, le:', pageWidth / 2, yPos);
 
-  // Save PDF
+  // Save or Print PDF
   const fileName = `Decompte_${project.marcheNo}_Periode_${periode.numero}_${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(fileName);
+  
+  if (printDirectly) {
+    // طباعة مباشرة باستخدام iframe مخفي
+    const pdfBlob = doc.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+    
+    // إنشاء iframe مخفي
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    iframe.src = pdfUrl;
+    
+    document.body.appendChild(iframe);
+    
+    iframe.onload = () => {
+      setTimeout(() => {
+        iframe.contentWindow?.print();
+        // حذف iframe بعد الطباعة
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+          URL.revokeObjectURL(pdfUrl);
+        }, 1000);
+      }, 500);
+    };
+  } else {
+    // حفظ PDF كملف
+    doc.save(fileName);
+  }
 }
