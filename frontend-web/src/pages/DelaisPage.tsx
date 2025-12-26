@@ -1,6 +1,6 @@
 import { FC, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, Project, ArretTravaux } from '../db/database';
+import { Project, ArretTravaux } from '../db/database';
+import { db } from '../db/database';
 import { Link } from 'react-router-dom';
 import {
   Clock,
@@ -18,6 +18,9 @@ import {
 import { format, differenceInDays, addMonths, addDays, parseISO, isValid } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuthStore } from '../store/authStore';
+import { isWeb } from '../utils/platform';
+import { apiService } from '../services/apiService';
+import { useProjects } from '../hooks/useUnifiedData';
 
 // حساب إجمالي أيام التوقف
 const calculateTotalArretDays = (arrets: ArretTravaux[] | undefined): number => {
@@ -135,29 +138,35 @@ const DelaisPage: FC = () => {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   
-  // جلب جميع المشاريع
-  const projects = useLiveQuery(
-    () => db.projects.filter(p => !p.deletedAt).toArray(),
-    []
-  );
+  // جلب جميع المشاريع باستخدام unified hooks
+  const { projects, isLoading, refresh } = useProjects(user?.id || null);
 
   // إحصائيات
-  const stats = projects?.reduce((acc, project) => {
+  const stats = projects?.reduce((acc: Record<string, number>, project: any) => {
     const info = calculateDelaiInfo(project);
     acc[info.status] = (acc[info.status] || 0) + 1;
     return acc;
   }, {} as Record<string, number>) || {};
 
-  // تصفية المشاريع
-  const filteredProjects = projects?.filter(project => {
+  // 🆕 استخراج الرقم الأول من رقم المشروع للترتيب
+  const extractFirstNumber = (marcheNo: string): number => {
+    const match = marcheNo?.match(/^(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  };
+
+  // تصفية المشاريع مع الترتيب
+  const filteredProjects = projects?.filter((project: any) => {
     if (filterStatus === 'all') return true;
     const info = calculateDelaiInfo(project);
     return info.status === filterStatus;
+  })?.sort((a: any, b: any) => {
+    // ترتيب تصاعدي حسب الرقم الأول من رقم المشروع
+    return extractFirstNumber(a.marcheNo) - extractFirstNumber(b.marcheNo);
   }) || [];
 
   // إضافة توقف جديد
   const handleAddArret = async (projectId: string, arret: Omit<ArretTravaux, 'id'>) => {
-    const project = projects?.find(p => p.id === projectId);
+    const project = projects?.find((p: any) => p.id === projectId);
     if (!project || !user) return;
 
     const newArret: ArretTravaux = {
@@ -167,10 +176,23 @@ const DelaisPage: FC = () => {
 
     const updatedArrets = [...(project.arrets || []), newArret];
     
-    await db.projects.update(projectId, {
-      arrets: updatedArrets,
-      updatedAt: new Date().toISOString(),
-    });
+    if (isWeb()) {
+      // 🌐 Web: API directe
+      try {
+        await apiService.updateProject(projectId.replace('project:', ''), {
+          arrets: updatedArrets,
+        });
+        refresh();
+      } catch (error) {
+        console.error('Error updating project:', error);
+      }
+    } else {
+      // 🖥️ Electron: IndexedDB
+      await db.projects.update(projectId, {
+        arrets: updatedArrets,
+        updatedAt: new Date().toISOString(),
+      });
+    }
 
     // تحديث المشروع المحدد
     if (selectedProject?.id === projectId) {
@@ -180,20 +202,41 @@ const DelaisPage: FC = () => {
 
   // حذف توقف
   const handleDeleteArret = async (projectId: string, arretId: string) => {
-    const project = projects?.find(p => p.id === projectId);
+    const project = projects?.find((p: any) => p.id === projectId);
     if (!project || !user) return;
 
-    const updatedArrets = (project.arrets || []).filter(a => a.id !== arretId);
+    const updatedArrets = ((project as any).arrets || []).filter((a: any) => a.id !== arretId);
     
-    await db.projects.update(projectId, {
-      arrets: updatedArrets,
-      updatedAt: new Date().toISOString(),
-    });
+    if (isWeb()) {
+      // 🌐 Web: API directe
+      try {
+        await apiService.updateProject(projectId.replace('project:', ''), {
+          arrets: updatedArrets,
+        });
+        refresh();
+      } catch (error) {
+        console.error('Error updating project:', error);
+      }
+    } else {
+      // 🖥️ Electron: IndexedDB
+      await db.projects.update(projectId, {
+        arrets: updatedArrets,
+        updatedAt: new Date().toISOString(),
+      });
+    }
 
     if (selectedProject?.id === projectId) {
       setSelectedProject({ ...selectedProject, arrets: updatedArrets });
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -292,12 +335,15 @@ const DelaisPage: FC = () => {
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-1">
-                    <h3 className="text-lg font-semibold text-gray-900">{project.objet}</h3>
+                    {/* 🆕 رقم المشروع يظهر في الأعلى كعنوان رئيسي */}
+                    <h3 className="text-lg font-bold text-primary-700">{project.marcheNo}</h3>
                     <span className={`flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full ${colors.bg} ${colors.text}`}>
                       <StatusIcon className="w-3 h-3" />
                       {statusLabels[info.status]}
                     </span>
                   </div>
+                  {/* 🆕 الاسم (Objet) يظهر تحت رقم المشروع */}
+                  <p className="text-sm text-gray-700 font-medium mb-1">{project.objet}</p>
                   <p className="text-sm text-gray-500">
                     Marché N° {project.marcheNo} • {project.societe || 'Société non définie'}
                   </p>

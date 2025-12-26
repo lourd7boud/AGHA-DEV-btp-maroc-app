@@ -5,6 +5,8 @@ import { logSyncOperation } from '../../services/syncService';
 import { X, Upload, FileSpreadsheet, CheckCircle, AlertCircle } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
+import { isWeb } from '../../utils/platform';
+import { apiService } from '../../services/apiService';
 
 interface Props {
   projectId: string;
@@ -136,8 +138,20 @@ const ImportExcelModal: FC<Props> = ({ projectId, onClose, onImported }) => {
       updatedAt: now,
     };
 
-    await db.bordereaux.add(newBordereau);
-    await logSyncOperation('CREATE', 'bordereau', bordereauId.replace('bordereau:', ''), newBordereau, user.id);
+    if (isWeb()) {
+      // Web: use API
+      await apiService.createBordereau({
+        projectId: projectId.replace('project:', ''),
+        reference: reference.trim(),
+        designation: designation.trim(),
+        lignes,
+        montantTotal,
+      });
+    } else {
+      // Electron: use IndexedDB
+      await db.bordereaux.add(newBordereau);
+      await logSyncOperation('CREATE', 'bordereau', bordereauId.replace('bordereau:', ''), newBordereau, user.id);
+    }
 
     onImported(bordereauId);
   };

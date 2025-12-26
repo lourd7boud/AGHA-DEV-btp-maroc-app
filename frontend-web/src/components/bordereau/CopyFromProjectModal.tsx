@@ -1,10 +1,12 @@
-import { FC, useState } from 'react';
+import { FC, useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, Bordereau } from '../../db/database';
+import { db, Bordereau, Project } from '../../db/database';
 import { useAuthStore } from '../../store/authStore';
 import { logSyncOperation } from '../../services/syncService';
 import { X, Copy, FileText } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import { isWeb } from '../../utils/platform';
+import { apiService } from '../../services/apiService';
 
 interface Props {
   currentProjectId: string;
@@ -19,19 +21,22 @@ const CopyFromProjectModal: FC<Props> = ({ currentProjectId, onClose, onCopied }
   const [newReference, setNewReference] = useState('');
   const [newDesignation, setNewDesignation] = useState('');
 
-  const projects = useLiveQuery(
-    () =>
-      db.projects
+  // For Electron: use IndexedDB
+  const electronProjects = useLiveQuery<Project[]>(
+    () => {
+      if (isWeb()) return Promise.resolve([] as Project[]);
+      return db.projects
         .where('userId')
         .equals(user?.id || '')
         .and((p) => !p.deletedAt && p.id !== `project:${currentProjectId}`)
-        .toArray(),
+        .toArray();
+    },
     [user, currentProjectId]
   );
 
-  const bordereaux = useLiveQuery<Bordereau[]>(
+  const electronBordereaux = useLiveQuery<Bordereau[]>(
     () => {
-      if (!selectedProjectId) return Promise.resolve([]);
+      if (isWeb() || !selectedProjectId) return Promise.resolve([] as Bordereau[]);
       return db.bordereaux
         .where('projectId')
         .equals(selectedProjectId)
@@ -41,13 +46,47 @@ const CopyFromProjectModal: FC<Props> = ({ currentProjectId, onClose, onCopied }
     [selectedProjectId]
   );
 
-  const selectedBordereau = useLiveQuery<Bordereau | null>(
+  const electronSelectedBordereau = useLiveQuery<Bordereau | null>(
     () => {
-      if (!selectedBordereauId) return Promise.resolve(null);
+      if (isWeb() || !selectedBordereauId) return Promise.resolve(null);
       return db.bordereaux.get(selectedBordereauId) as Promise<Bordereau>;
     },
     [selectedBordereauId]
   );
+
+  // For Web: use API
+  const [webProjects, setWebProjects] = useState<any[]>([]);
+  const [webBordereaux, setWebBordereaux] = useState<Bordereau[]>([]);
+  const [webSelectedBordereau, setWebSelectedBordereau] = useState<Bordereau | null>(null);
+
+  useEffect(() => {
+    if (isWeb()) {
+      apiService.getProjects().then(res => {
+        const data = res.data || res;
+        setWebProjects(data.filter((p: any) => p.id !== currentProjectId));
+      });
+    }
+  }, [currentProjectId]);
+
+  useEffect(() => {
+    if (isWeb() && selectedProjectId) {
+      const cleanId = selectedProjectId.replace('project:', '');
+      apiService.getBordereaux(cleanId).then(res => {
+        setWebBordereaux((res.data || res) as Bordereau[]);
+      });
+    }
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (isWeb() && selectedBordereauId) {
+      const found = webBordereaux.find(b => b.id === selectedBordereauId);
+      setWebSelectedBordereau(found || null);
+    }
+  }, [selectedBordereauId, webBordereaux]);
+
+  const projects = isWeb() ? webProjects : electronProjects;
+  const bordereaux = isWeb() ? webBordereaux : electronBordereaux;
+  const selectedBordereau = isWeb() ? webSelectedBordereau : electronSelectedBordereau;
 
   const handleCopy = async () => {
     if (!user || !selectedBordereau || !newReference.trim() || !newDesignation.trim()) {
@@ -78,8 +117,20 @@ const CopyFromProjectModal: FC<Props> = ({ currentProjectId, onClose, onCopied }
       updatedAt: now,
     };
 
-    await db.bordereaux.add(newBordereau);
-    await logSyncOperation('CREATE', 'bordereau', bordereauId.replace('bordereau:', ''), newBordereau, user.id);
+    if (isWeb()) {
+      // Web: use API
+      await apiService.createBordereau({
+        projectId: currentProjectId.replace('project:', ''),
+        reference: newReference.trim(),
+        designation: newDesignation.trim(),
+        lignes: copiedLignes,
+        montantTotal: 0,
+      });
+    } else {
+      // Electron: use IndexedDB
+      await db.bordereaux.add(newBordereau);
+      await logSyncOperation('CREATE', 'bordereau', bordereauId.replace('bordereau:', ''), newBordereau, user.id);
+    }
 
     onCopied(bordereauId);
   };

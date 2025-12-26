@@ -1,16 +1,22 @@
 import { Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { getCouchDB } from '../config/database';
+import { getPool } from '../config/postgres';
 import { ApiError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-import { PV } from '../models/types';
+import logger from '../utils/logger';
 
+/**
+ * Create PV (PostgreSQL version)
+ */
 export const createPV = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    console.log('=== PV CREATE REQUEST ===');
+    logger.info('Creating PV...');
+    
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId, type, numero, date, objet, contenu, participants, attachments } = req.body;
@@ -19,64 +25,94 @@ export const createPV = async (
       throw new ApiError('Required fields missing', 400);
     }
 
-    const db = getCouchDB();
+    const pool = getPool();
+    const pvId = uuidv4();
 
-    const pv: PV = {
-      _id: `pv:${uuidv4()}`,
-      projectId,
-      userId: req.user.id,
-      type,
-      numero,
-      date: new Date(date),
-      objet,
-      contenu: contenu || '',
-      participants: participants || [],
-      attachments: attachments || [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    // Check project exists and belongs to user
+    const projectCheck = await pool.query(
+      'SELECT id FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL',
+      [projectId, req.user.id]
+    );
 
-    const result = await db.insert({ ...pv, type: 'pv' });
+    if (projectCheck.rows.length === 0) {
+      throw new ApiError('Project not found or not authorized', 404);
+    }
+
+    const result = await pool.query(
+      `INSERT INTO pvs (
+        id, project_id, type, numero, date, objet, contenu, 
+        participants, attachments, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+       RETURNING *`,
+      [
+        pvId,
+        projectId,
+        type,
+        numero,
+        new Date(date),
+        objet,
+        contenu || '',
+        JSON.stringify(participants || []),
+        JSON.stringify(attachments || [])
+      ]
+    );
+
+    logger.info(`PV created: ${pvId}`);
 
     res.status(201).json({
       success: true,
-      data: { ...pv, _rev: result.rev },
+      data: result.rows[0],
     });
   } catch (error) {
+    logger.error('Error creating PV:', error);
     next(error);
   }
 };
 
+/**
+ * Get all PVs for a project (PostgreSQL version)
+ */
 export const getPVs = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    console.log('=== PVS GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;
-    const db = getCouchDB();
+    const pool = getPool();
 
-    const result = await db.find({
-      selector: {
-        type: 'pv',
-        projectId,
-        userId: req.user.id,
-        deletedAt: { $exists: false },
-      },
-    });
+    // Verify project ownership
+    const projectCheck = await pool.query(
+      'SELECT id FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL',
+      [projectId, req.user.id]
+    );
+
+    if (projectCheck.rows.length === 0) {
+      throw new ApiError('Project not found or not authorized', 404);
+    }
+
+    const result = await pool.query(
+      `SELECT * FROM pvs WHERE project_id = $1 AND deleted_at IS NULL ORDER BY date DESC`,
+      [projectId]
+    );
 
     res.json({
       success: true,
-      data: result.docs,
-      count: result.docs.length,
+      data: result.rows,
+      count: result.rows.length,
     });
   } catch (error) {
+    logger.error('Error fetching PVs:', error);
     next(error);
   }
 };
 
+/**
+ * Get PV by ID (PostgreSQL version)
+ */
 export const getPVById = async (
   req: AuthRequest,
   res: Response,
@@ -86,23 +122,31 @@ export const getPVById = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const pv = await db.get(`pv:${id}`);
+    const pool = getPool();
 
-    if (pv.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    const result = await pool.query(
+      `SELECT pv.* FROM pvs pv
+       INNER JOIN projects p ON pv.project_id = p.id
+       WHERE pv.id = $1 AND p.user_id = $2 AND pv.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new ApiError('PV not found', 404);
     }
 
-    res.json({ success: true, data: pv });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('PV not found', 404));
-    } else {
-      next(error);
-    }
+    res.json({
+      success: true,
+      data: result.rows[0],
+    });
+  } catch (error) {
+    next(error);
   }
 };
 
+/**
+ * Update PV (PostgreSQL version)
+ */
 export const updatePV = async (
   req: AuthRequest,
   res: Response,
@@ -112,34 +156,58 @@ export const updatePV = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const pv = await db.get(`pv:${id}`);
+    const { type, numero, date, objet, contenu, participants, attachments } = req.body;
+    const pool = getPool();
 
-    if (pv.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    // Check ownership
+    const existing = await pool.query(
+      `SELECT pv.* FROM pvs pv
+       INNER JOIN projects p ON pv.project_id = p.id
+       WHERE pv.id = $1 AND p.user_id = $2 AND pv.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (existing.rows.length === 0) {
+      throw new ApiError('PV not found', 404);
     }
 
-    const updated = {
-      ...pv,
-      ...req.body,
-      updatedAt: new Date(),
-    };
+    const result = await pool.query(
+      `UPDATE pvs SET 
+        type = COALESCE($1, type),
+        numero = COALESCE($2, numero),
+        date = COALESCE($3, date),
+        objet = COALESCE($4, objet),
+        contenu = COALESCE($5, contenu),
+        participants = COALESCE($6, participants),
+        attachments = COALESCE($7, attachments),
+        updated_at = NOW()
+       WHERE id = $8 RETURNING *`,
+      [
+        type,
+        numero,
+        date ? new Date(date) : null,
+        objet,
+        contenu,
+        participants ? JSON.stringify(participants) : null,
+        attachments ? JSON.stringify(attachments) : null,
+        id
+      ]
+    );
 
-    const result = await db.insert(updated);
+    logger.info(`PV updated: ${id}`);
 
     res.json({
       success: true,
-      data: { ...updated, _rev: result.rev },
+      data: result.rows[0],
     });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('PV not found', 404));
-    } else {
-      next(error);
-    }
+  } catch (error) {
+    next(error);
   }
 };
 
+/**
+ * Delete PV (PostgreSQL version)
+ */
 export const deletePV = async (
   req: AuthRequest,
   res: Response,
@@ -149,26 +217,32 @@ export const deletePV = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const pv = await db.get(`pv:${id}`);
+    const pool = getPool();
 
-    if (pv.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    // Check ownership
+    const existing = await pool.query(
+      `SELECT pv.* FROM pvs pv
+       INNER JOIN projects p ON pv.project_id = p.id
+       WHERE pv.id = $1 AND p.user_id = $2 AND pv.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (existing.rows.length === 0) {
+      throw new ApiError('PV not found', 404);
     }
 
-    pv.deletedAt = new Date();
-    pv.updatedAt = new Date();
-    await db.insert(pv);
+    await pool.query(
+      `UPDATE pvs SET deleted_at = NOW() WHERE id = $1`,
+      [id]
+    );
+
+    logger.info(`PV deleted: ${id}`);
 
     res.json({
       success: true,
       message: 'PV deleted successfully',
     });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('PV not found', 404));
-    } else {
-      next(error);
-    }
+  } catch (error) {
+    next(error);
   }
 };

@@ -8,7 +8,7 @@ import {
   getPhotos,
   getPhotoById,
   deletePhoto,
-} from '../controllers/photo.controller.pg';
+} from '../controllers/photo.controller';
 
 const router = Router();
 router.use(authenticate);

@@ -1,8 +1,24 @@
 import { FC, useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useLiveQuery } from 'dexie-react-hooks';
+import {
+  useProject,
+  useBordereaux,
+  useDecompts,
+  usePhotos,
+  usePvs,
+  useAttachments,
+  usePeriodes,
+  useAggregatedMetres,
+  useCanModify,
+  useMetres,
+} from '../hooks/useUnifiedData';
+import { isWeb } from '../utils/platform';
+import { apiService } from '../services/apiService';
+import { assetService, ProjectAsset } from '../services/assetService';
 import { db } from '../db/database';
+import { logSyncOperation } from '../services/syncService';
+import { PhotosTab, PVTab, DocumentsTab } from '../components/project';
 import {
   ArrowLeft,
   Edit2,
@@ -29,9 +45,8 @@ import {
   ChevronRight,
   AlertCircle,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { logSyncOperation } from '../services/syncService';
 import { useAuthStore } from '../store/authStore';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -42,6 +57,18 @@ import {
   CopyFromProjectModal,
 } from '../components/bordereau';
 import { openProjectFolder } from '../services/fileSystemService';
+
+// Helper function to safely format dates
+const safeFormatDate = (dateValue: string | undefined | null, formatStr: string, fallback: string = '-'): string => {
+  if (!dateValue) return fallback;
+  try {
+    const date = typeof dateValue === 'string' ? parseISO(dateValue) : new Date(dateValue);
+    if (!isValid(date)) return fallback;
+    return format(date, formatStr, { locale: fr });
+  } catch {
+    return fallback;
+  }
+};
 
 type TabType = 'overview' | 'bordereau' | 'periodes' | 'metre' | 'decompt' | 'photos' | 'pv' | 'documents';
 type CreateMode = 'blank' | 'template' | 'copy' | 'import' | null;
@@ -54,205 +81,58 @@ const ProjectDetailPage: FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [showMenu, setShowMenu] = useState(false);
   const [createMode, setCreateMode] = useState<CreateMode>(null);
+  const { canModify, reason: cannotModifyReason } = useCanModify();
+
+  // 🔴 Project Assets state (unified: photos, pv, documents)
+  const [projectPhotos, setProjectPhotos] = useState<ProjectAsset[]>([]);
+  const [projectPVs, setProjectPVs] = useState<ProjectAsset[]>([]);
+  const [projectDocuments, setProjectDocuments] = useState<ProjectAsset[]>([]);
+  const [_assetsLoading, setAssetsLoading] = useState(false);
 
   // Support both formats: with "project:" prefix and without
   const projectId = id?.startsWith('project:') ? id : `project:${id}`;
   const rawId = id?.startsWith('project:') ? id.replace('project:', '') : id;
 
-  console.log('🔍 ProjectDetailPage - URL id:', id);
-  console.log('🔍 ProjectDetailPage - projectId (with prefix):', projectId);
-  console.log('🔍 ProjectDetailPage - rawId (without prefix):', rawId);
+  // 🔴 استخدام Unified Hooks بدلاً من useLiveQuery
+  const { project, isLoading: projectLoading, refresh: refreshProject } = useProject(rawId || null);
+  const { bordereaux, refresh: refreshBordereaux } = useBordereaux(rawId || null);
+  const { decompts, refresh: refreshDecompts } = useDecompts(rawId || null);
+  const { photos: _photos } = usePhotos(rawId || null);
+  const { pvs: _pvs } = usePvs(rawId || null);
+  const { attachments: _attachments } = useAttachments(rawId || null);
+  const { periodes, refresh: refreshPeriodes } = usePeriodes(rawId || null);
+  const { aggregatedMetres } = useAggregatedMetres(rawId || null);
+  const { metres } = useMetres(rawId || null);
 
-  const project = useLiveQuery(async () => {
-    console.log('🔍 Searching for project with prefix:', projectId);
-    // Try with prefix first
-    let proj = await db.projects.get(projectId);
-    console.log('🔍 Result with prefix:', proj ? 'FOUND' : 'NOT FOUND');
-    
-    // If not found, try without prefix
-    if (!proj) {
-      console.log('🔍 Searching for project without prefix:', rawId);
-      proj = await db.projects.get(rawId!);
-      console.log('🔍 Result without prefix:', proj ? 'FOUND' : 'NOT FOUND');
+  // 🔴 Load project assets (unified: photos, pv, documents)
+  const loadAssets = async () => {
+    if (!rawId) return;
+    setAssetsLoading(true);
+    try {
+      const [photosData, pvsData, docsData] = await Promise.all([
+        assetService.getPhotos(rawId),
+        assetService.getPVs(rawId),
+        assetService.getDocuments(rawId),
+      ]);
+      setProjectPhotos(photosData);
+      setProjectPVs(pvsData);
+      setProjectDocuments(docsData);
+    } catch (error) {
+      console.error('Error loading assets:', error);
+    } finally {
+      setAssetsLoading(false);
     }
-    
-    // Also log all projects in DB for debugging
-    const allProjects = await db.projects.toArray();
-    console.log('🔍 All projects in IndexedDB:', allProjects.map(p => ({ id: p.id, objet: p.objet })));
-    
-    return proj;
-  }, [id]);
+  };
 
-  // Récupérer les données liées - search both formats
-  const bordereaux = useLiveQuery(
-    async () => {
-      const withPrefix = await db.bordereaux.where('projectId').equals(projectId).and((b) => !b.deletedAt).toArray();
-      if (withPrefix.length > 0) return withPrefix;
-      return db.bordereaux.where('projectId').equals(rawId!).and((b) => !b.deletedAt).toArray();
-    },
-    [id]
-  );
-
-  const metres = useLiveQuery(
-    async () => {
-      const withPrefix = await db.metres.where('projectId').equals(projectId).and((m) => !m.deletedAt).toArray();
-      if (withPrefix.length > 0) return withPrefix;
-      return db.metres.where('projectId').equals(rawId!).and((m) => !m.deletedAt).toArray();
-    },
-    [id]
-  );
-
-  // Aggregated metres: group by bordereauLigneId, show each article once
-  // Qté Partielle = quantity from the latest période's metre
-  // Qté Cumulée = sum of all quantities from all périodes
-  const aggregatedMetres = useLiveQuery(
-    async () => {
-      // Get all metres for this project
-      let allMetres = await db.metres.where('projectId').equals(projectId).and((m) => !m.deletedAt).toArray();
-      if (allMetres.length === 0) {
-        allMetres = await db.metres.where('projectId').equals(rawId!).and((m) => !m.deletedAt).toArray();
-      }
-      if (allMetres.length === 0) return [];
-
-      // Get all périodes to determine which is the latest
-      let allPeriodes = await db.periodes.where('projectId').equals(projectId).and((p) => !p.deletedAt).toArray();
-      if (allPeriodes.length === 0) {
-        allPeriodes = await db.periodes.where('projectId').equals(rawId!).and((p) => !p.deletedAt).toArray();
-      }
-
-      // Sort périodes by numero descending to find the latest
-      const sortedPeriodes = allPeriodes.sort((a, b) => b.numero - a.numero);
-      const latestPeriodeId = sortedPeriodes.length > 0 ? sortedPeriodes[0].id : null;
-
-      // Helper to normalize bordereauLigneId (remove projectId prefix if present)
-      const normalizeBordereauLigneId = (id: string): string => {
-        if (id.includes('_')) {
-          const parts = id.split('_');
-          return parts[parts.length - 1]; // Get the last part (Lxx)
-        }
-        return id;
-      };
-
-      // Group metres by normalized bordereauLigneId
-      const groupedMap = new Map<string, {
-        reference: string;
-        designationBordereau: string;
-        unite: string;
-        quantiteBordereau: number;
-        totalCumule: number;
-        totalPartiel: number;
-        pourcentageRealisation: number;
-        latestMetre: typeof allMetres[0] | null;
-      }>();
-
-      for (const metre of allMetres) {
-        const normalizedId = normalizeBordereauLigneId(metre.bordereauLigneId);
-        
-        const existing = groupedMap.get(normalizedId);
-        if (existing) {
-          // Add to cumulative total
-          existing.totalCumule += metre.totalPartiel || 0;
-          // Check if this is from the latest période
-          if (metre.periodeId === latestPeriodeId) {
-            existing.totalPartiel = metre.totalPartiel || 0;
-            existing.latestMetre = metre;
-          }
-        } else {
-          groupedMap.set(normalizedId, {
-            reference: metre.reference,
-            designationBordereau: metre.designationBordereau,
-            unite: metre.unite,
-            quantiteBordereau: metre.quantiteBordereau,
-            totalCumule: metre.totalPartiel || 0,
-            totalPartiel: metre.periodeId === latestPeriodeId ? (metre.totalPartiel || 0) : 0,
-            pourcentageRealisation: 0, // Will calculate after
-            latestMetre: metre.periodeId === latestPeriodeId ? metre : null,
-          });
-        }
-      }
-
-      // Convert to array and calculate pourcentageRealisation
-      const result = Array.from(groupedMap.entries()).map(([normalizedId, data]) => {
-        const qtyBordereau = Number(data.quantiteBordereau) || 0;
-        const totalCumule = Number(data.totalCumule) || 0;
-        const pourcentage = qtyBordereau > 0 
-          ? (totalCumule / qtyBordereau) * 100 
-          : 0;
-        // Extract just the line number from reference (e.g., "METRE-P1-L1" -> "L1")
-        const refParts = data.reference.split('-');
-        const cleanRef = refParts.length > 0 ? refParts[refParts.length - 1] : data.reference;
-        return {
-          id: normalizedId,
-          reference: cleanRef,
-          designationBordereau: data.designationBordereau,
-          unite: data.unite,
-          quantiteBordereau: qtyBordereau,
-          totalPartiel: Number(data.totalPartiel) || 0,
-          totalCumule: totalCumule,
-          pourcentageRealisation: isNaN(pourcentage) ? 0 : pourcentage,
-        };
-      });
-
-      // Sort by reference (L1, L2, L3, etc.)
-      result.sort((a, b) => {
-        const numA = parseInt(a.reference.replace(/\D/g, '')) || 0;
-        const numB = parseInt(b.reference.replace(/\D/g, '')) || 0;
-        return numA - numB;
-      });
-
-      return result;
-    },
-    [id]
-  );
-
-  const decompts = useLiveQuery(
-    async () => {
-      const withPrefix = await db.decompts.where('projectId').equals(projectId).and((d) => !d.deletedAt).toArray();
-      if (withPrefix.length > 0) return withPrefix;
-      return db.decompts.where('projectId').equals(rawId!).and((d) => !d.deletedAt).toArray();
-    },
-    [id]
-  );
-
-  const photos = useLiveQuery(
-    async () => {
-      const withPrefix = await db.photos.where('projectId').equals(projectId).and((p) => !p.deletedAt).toArray();
-      if (withPrefix.length > 0) return withPrefix;
-      return db.photos.where('projectId').equals(rawId!).and((p) => !p.deletedAt).toArray();
-    },
-    [id]
-  );
-
-  const pvs = useLiveQuery(
-    async () => {
-      const withPrefix = await db.pvs.where('projectId').equals(projectId).and((p) => !p.deletedAt).toArray();
-      if (withPrefix.length > 0) return withPrefix;
-      return db.pvs.where('projectId').equals(rawId!).and((p) => !p.deletedAt).toArray();
-    },
-    [id]
-  );
-
-  const attachments = useLiveQuery(
-    async () => {
-      const withPrefix = await db.attachments.where('projectId').equals(projectId).and((a) => !a.deletedAt).toArray();
-      if (withPrefix.length > 0) return withPrefix;
-      return db.attachments.where('projectId').equals(rawId!).and((a) => !a.deletedAt).toArray();
-    },
-    [id]
-  );
-
-  const periodes = useLiveQuery(
-    async () => {
-      const withPrefix = await db.periodes.where('projectId').equals(projectId).and((p) => !p.deletedAt).toArray();
-      if (withPrefix.length > 0) return withPrefix;
-      return db.periodes.where('projectId').equals(rawId!).and((p) => !p.deletedAt).toArray();
-    },
-    [id]
-  );
+  useEffect(() => {
+    if (rawId) {
+      loadAssets();
+    }
+  }, [rawId]);
 
   // Calculer le montant TTC depuis le bordereau
   const montantTTC = bordereaux && bordereaux.length > 0
-    ? bordereaux[0].lignes.reduce((sum, ligne) => {
+    ? bordereaux[0].lignes.reduce((sum: number, ligne: any) => {
         const montantHT = ligne.quantite * (ligne.prixUnitaire || 0);
         const montantTTC = montantHT * 1.2; // +20% TVA
         return sum + montantTTC;
@@ -264,13 +144,13 @@ const ProjectDetailPage: FC = () => {
     if (!decompts || decompts.length === 0 || montantTTC === 0) return 0;
     
     // إيجاد آخر ديكونت (الأعلى رقماً)
-    const dernierDecompte = decompts.reduce((latest, d) => {
+    const dernierDecompte = decompts.reduce((latest: any, d: any) => {
       if (!latest || d.numero > latest.numero) return d;
       return latest;
     }, decompts[0]);
     
     // استخدام totalTTC إن وجد، وإلا montantTotal
-    const montantDecompte = (dernierDecompte as any)?.totalTTC || dernierDecompte?.montantTotal || 0;
+    const montantDecompte = dernierDecompte?.totalTTC || dernierDecompte?.montantTotal || dernierDecompte?.montantTTC || 0;
     
     // حساب النسبة
     const progress = (montantDecompte / montantTTC) * 100;
@@ -281,23 +161,41 @@ const ProjectDetailPage: FC = () => {
 
   const handleDelete = async () => {
     if (!user || !project) return;
+    if (!canModify) {
+      alert(cannotModifyReason || 'Vous ne pouvez pas modifier les données en mode hors ligne');
+      return;
+    }
     
     if (!confirm('Êtes-vous sûr de vouloir supprimer ce projet ? Cette action est irréversible.')) {
       return;
     }
 
-    await db.projects.update(project.id, {
-      deletedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-
-    await logSyncOperation('DELETE', 'project', id!, project, user.id);
-    navigate('/projects');
+    try {
+      if (isWeb()) {
+        // 🌐 Web: API directe
+        await apiService.deleteProject(rawId!);
+      } else {
+        // 🖥️ Electron: IndexedDB + sync
+        await db.projects.update(project.id, {
+          deletedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        await logSyncOperation('DELETE', 'project', rawId!, project, user.id);
+      }
+      navigate('/projects');
+    } catch (error) {
+      console.error('Error deleting project:', error);
+      alert('Erreur lors de la suppression du projet');
+    }
   };
 
   // Créer un nouveau bordereau vide
   const handleCreateBlank = async (data: { reference: string; designation: string }) => {
     if (!user || !id) return;
+    if (!canModify) {
+      alert(cannotModifyReason || 'Vous ne pouvez pas modifier les données en mode hors ligne');
+      return;
+    }
 
     const bordereauId = `bordereau:${uuidv4()}`;
     const now = new Date().toISOString();
@@ -314,10 +212,172 @@ const ProjectDetailPage: FC = () => {
       updatedAt: now,
     };
 
-    await db.bordereaux.add(newBordereau);
-    await logSyncOperation('CREATE', 'bordereau', bordereauId.replace('bordereau:', ''), newBordereau, user.id);
+    try {
+      if (isWeb()) {
+        // 🌐 Web: API directe
+        await apiService.createBordereau({
+          projectId: rawId,
+          reference: data.reference,
+          designation: data.designation,
+          lignes: [],
+        });
+        refreshBordereaux();
+      } else {
+        // 🖥️ Electron: IndexedDB + sync
+        await db.bordereaux.add(newBordereau);
+        await logSyncOperation('CREATE', 'bordereau', bordereauId.replace('bordereau:', ''), newBordereau, user.id);
+      }
+    } catch (error) {
+      console.error('Error creating bordereau:', error);
+      alert('Erreur lors de la création du bordereau');
+    }
 
     setCreateMode(null);
+  };
+
+  // إنشاء ميتري جديد مع ديكونت مرتبط (نظام تراكمي)
+  const handleCreateNewMetre = async () => {
+    if (!user || !id || !bordereaux || bordereaux.length === 0) return;
+    if (!canModify) {
+      alert(cannotModifyReason || 'Vous ne pouvez pas modifier les données en mode hors ligne');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    
+    // 🌐 Web: استخدام API مباشر
+    if (isWeb()) {
+      try {
+        // إنشاء période جديدة
+        const periodeRes = await apiService.createPeriode({
+          projectId: rawId!,
+          numero: (periodes?.length || 0) + 1,
+          libelle: `Période ${(periodes?.length || 0) + 1}`,
+          dateDebut: now,
+          dateFin: now,
+          statut: 'en_cours',
+        });
+        const newPeriodeId = periodeRes.data?.id || periodeRes.id;
+        
+        // إنشاء décompte مرتبط
+        await apiService.createDecompt({
+          projectId: rawId,
+          periodeId: newPeriodeId,
+          numero: (periodes?.length || 0) + 1,
+          statut: 'draft',
+        });
+        
+        // Refresh data
+        refreshPeriodes();
+        refreshDecompts();
+        
+        // Navigate to metre page
+        navigate(`/projects/${rawId}/metre/${newPeriodeId.replace('periode:', '')}`);
+      } catch (error) {
+        console.error('Error creating new metre:', error);
+        alert('Erreur lors de la création du métré');
+      }
+      return;
+    }
+
+    // 🖥️ Electron: IndexedDB + sync
+    // حساب رقم الميتري الجديد
+    const existingPeriodes = await db.periodes.where('projectId').equals(projectId).and((p: any) => !p.deletedAt).toArray();
+    const newNumero = existingPeriodes.length + 1;
+
+    // إنشاء période جديدة
+    const periodeId = `periode:${uuidv4()}`;
+    const newPeriode = {
+      id: periodeId,
+      projectId: projectId,
+      userId: user.id,
+      numero: newNumero,
+      libelle: `Période ${newNumero}`,
+      dateDebut: now,
+      dateFin: now,
+      statut: 'en_cours' as const,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.periodes.add(newPeriode);
+    await logSyncOperation('CREATE', 'periode', periodeId.replace('periode:', ''), newPeriode, user.id);
+
+    // 🔴 لا ننسخ البيانات التفصيلية - cumulativeMetresData في MetrePage سيجلبها تلقائياً
+    // نحتفظ فقط بـ totalCumule للعرض في القائمة
+    if (newNumero > 1) {
+      const previousPeriode = existingPeriodes.find(p => p.numero === newNumero - 1);
+      if (previousPeriode) {
+        const previousMetres = await db.metres
+          .where('periodeId')
+          .equals(previousPeriode.id)
+          .and((m) => !m.deletedAt)
+          .toArray();
+
+        // إنشاء سجلات فارغة فقط للاحتفاظ بـ totalCumule
+        for (const prevMetre of previousMetres) {
+          const newMetreId = `metre:${uuidv4()}`;
+          const newMetre = {
+            id: newMetreId,
+            projectId: projectId,
+            periodeId: periodeId,
+            bordereauLigneId: prevMetre.bordereauLigneId,
+            userId: user.id,
+            reference: prevMetre.reference,
+            designationBordereau: prevMetre.designationBordereau,
+            unite: prevMetre.unite,
+            // 🔴 البيانات فارغة - سيتم جلب السابقة من cumulativeMetresData
+            sections: [],
+            subSections: [],
+            lignes: [],
+            // الجزئي = 0 (لم نضف شيء جديد بعد)
+            totalPartiel: 0,
+            // التراكمي = نفس السابق (للعرض في القائمة)
+            totalCumule: prevMetre.totalCumule || prevMetre.totalPartiel || 0,
+            quantiteBordereau: prevMetre.quantiteBordereau,
+            pourcentageRealisation: prevMetre.pourcentageRealisation || 0,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          await db.metres.add(newMetre);
+          await logSyncOperation('CREATE', 'metre', newMetreId.replace('metre:', ''), newMetre, user.id);
+        }
+      }
+    }
+
+    // إنشاء ديكونت مرتبط
+    const decomptId = `decompt:${uuidv4()}`;
+    
+    // حساب المبلغ التراكمي من الفترات السابقة
+    let montantCumule = 0;
+    if (newNumero > 1) {
+      const previousDecomptes = await db.decompts
+        .where('projectId')
+        .equals(projectId)
+        .and((d) => !d.deletedAt)
+        .toArray();
+      montantCumule = previousDecomptes.reduce((sum, d) => sum + (Number(d.montantTotal) || 0), 0);
+    }
+
+    const newDecompt = {
+      id: decomptId,
+      projectId: projectId,
+      periodeId: periodeId,
+      userId: user.id,
+      numero: newNumero,
+      lignes: [],
+      montantTotal: 0,
+      montantCumule: montantCumule,
+      statut: 'draft' as const,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await db.decompts.add(newDecompt);
+    await logSyncOperation('CREATE', 'decompt', decomptId.replace('decompt:', ''), newDecompt, user.id);
+
+    // الانتقال لصفحة تحرير الميتري مع معرف الـ période
+    navigate(`/projects/${rawId}/metre/${periodeId.replace('periode:', '')}`);
   };
 
   // Handle loading state - show error after timeout if no data
@@ -325,13 +385,13 @@ const ProjectDetailPage: FC = () => {
   
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (!project) {
+      if (!project && !projectLoading) {
         setLoadingTimeout(true);
       }
     }, 5000); // 5 seconds timeout
     
     return () => clearTimeout(timer);
-  }, [project]);
+  }, [project, projectLoading]);
 
   if (!project) {
     if (loadingTimeout) {
@@ -342,12 +402,12 @@ const ProjectDetailPage: FC = () => {
               <AlertCircle className="w-8 h-8 text-yellow-600" />
             </div>
             <p className="text-gray-700 font-medium mb-2">Projet non trouvé</p>
-            <p className="text-gray-500 text-sm mb-4">Le projet n'existe pas localement. Essayez de synchroniser.</p>
+            <p className="text-gray-500 text-sm mb-4">{isWeb() ? 'Le projet n\'existe pas sur le serveur.' : 'Le projet n\'existe pas localement. Essayez de synchroniser.'}</p>
             <button 
-              onClick={() => window.location.reload()} 
+              onClick={() => isWeb() ? refreshProject() : window.location.reload()} 
               className="btn btn-primary"
             >
-              Rafraîchir la page
+              {isWeb() ? 'Réessayer' : 'Rafraîchir la page'}
             </button>
           </div>
         </div>
@@ -369,9 +429,9 @@ const ProjectDetailPage: FC = () => {
     { id: 'bordereau', label: 'Bordereau', icon: FileText, count: bordereaux && bordereaux.length > 0 ? 1 : 0 },
     { id: 'metre', label: 'Métré', icon: TrendingUp, count: aggregatedMetres?.length || 0 },
     { id: 'decompt', label: 'Décompte', icon: DollarSign, count: decompts?.length || 0 },
-    { id: 'photos', label: 'Photos', icon: Image, count: photos?.length || 0 },
-    { id: 'pv', label: 'PV', icon: FileText, count: pvs?.length || 0 },
-    { id: 'documents', label: 'Documents', icon: Paperclip, count: attachments?.length || 0 },
+    { id: 'photos', label: 'Photos', icon: Image, count: projectPhotos.length },
+    { id: 'pv', label: 'PV', icon: FileText, count: projectPVs.length },
+    { id: 'documents', label: 'Documents', icon: Paperclip, count: projectDocuments.length },
   ];
 
   const getStatusColor = (status: string) => {
@@ -507,7 +567,7 @@ const ProjectDetailPage: FC = () => {
         </div>
         <div className="mt-2 flex justify-between items-center">
           <span className="text-xs text-gray-500">
-            Mis à jour le {format(new Date(project.updatedAt), 'dd MMMM yyyy à HH:mm', { locale: fr })}
+            Mis à jour le {safeFormatDate(project.updatedAt, 'dd MMMM yyyy à HH:mm')}
           </span>
           {projectProgress > 100 && (
             <span className="text-xs text-red-500 font-medium">⚠️ Dépassement du budget!</span>
@@ -559,7 +619,7 @@ const ProjectDetailPage: FC = () => {
               <Image className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900">{photos?.length || 0}</p>
+              <p className="text-2xl font-bold text-gray-900">{projectPhotos.length}</p>
               <p className="text-sm text-gray-600">Photos</p>
             </div>
           </div>
@@ -625,7 +685,7 @@ const ProjectDetailPage: FC = () => {
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Date d'ouverture</p>
                     <p className="font-medium text-gray-900">
-                      {format(new Date(project.dateOuverture), 'dd/MM/yyyy')}
+                      {safeFormatDate(project.dateOuverture, 'dd/MM/yyyy')}
                     </p>
                   </div>
                   <div>
@@ -649,28 +709,28 @@ const ProjectDetailPage: FC = () => {
               </div>
 
               {/* Informations administratives */}
-              {(project.snss || project.cbn || project.rcn || project.osc) && (
+              {((project as any).snss || (project as any).cbn || (project as any).rcn || project.osc) && (
                 <div className="card">
                   <h2 className="text-lg font-semibold text-gray-900 mb-4">
                     Informations administratives
                   </h2>
                   <div className="grid grid-cols-2 gap-6">
-                    {project.snss && (
+                    {(project as any).snss && (
                       <div>
                         <p className="text-sm text-gray-600 mb-1">SNSS</p>
-                        <p className="font-medium text-gray-900">{project.snss}</p>
+                        <p className="font-medium text-gray-900">{(project as any).snss}</p>
                       </div>
                     )}
-                    {project.cbn && (
+                    {(project as any).cbn && (
                       <div>
                         <p className="text-sm text-gray-600 mb-1">CBN</p>
-                        <p className="font-medium text-gray-900">{project.cbn}</p>
+                        <p className="font-medium text-gray-900">{(project as any).cbn}</p>
                       </div>
                     )}
-                    {project.rcn && (
+                    {(project as any).rcn && (
                       <div>
                         <p className="text-sm text-gray-600 mb-1">RCN</p>
-                        <p className="font-medium text-gray-900">{project.rcn}</p>
+                        <p className="font-medium text-gray-900">{(project as any).rcn}</p>
                       </div>
                     )}
                     {project.osc && (
@@ -684,7 +744,7 @@ const ProjectDetailPage: FC = () => {
               )}
 
               {/* Informations société */}
-              {(project.societe || project.patente || project.delaisEntreeService) && (
+              {(project.societe || project.patente || (project as any).delaisEntreeService) && (
                 <div className="card">
                   <h2 className="text-lg font-semibold text-gray-900 mb-4">Informations de la société</h2>
                   <div className="grid grid-cols-2 gap-6">
@@ -700,10 +760,10 @@ const ProjectDetailPage: FC = () => {
                         <p className="font-medium text-gray-900">{project.patente}</p>
                       </div>
                     )}
-                    {project.delaisEntreeService && (
+                    {(project as any).delaisEntreeService && (
                       <div>
                         <p className="text-sm text-gray-600 mb-1">Délais d'entrée en service</p>
-                        <p className="font-medium text-gray-900">{project.delaisEntreeService}</p>
+                        <p className="font-medium text-gray-900">{(project as any).delaisEntreeService}</p>
                       </div>
                     )}
                   </div>
@@ -724,7 +784,7 @@ const ProjectDetailPage: FC = () => {
                     <div className="flex-1">
                       <p className="text-sm font-medium text-gray-900">Projet créé</p>
                       <p className="text-xs text-gray-500">
-                        {format(new Date(project.createdAt), 'dd/MM/yyyy à HH:mm', { locale: fr })}
+                        {safeFormatDate(project.createdAt, 'dd/MM/yyyy à HH:mm')}
                       </p>
                     </div>
                   </div>
@@ -737,7 +797,7 @@ const ProjectDetailPage: FC = () => {
                       <div className="flex-1">
                         <p className="text-sm font-medium text-gray-900">Dernière modification</p>
                         <p className="text-xs text-gray-500">
-                          {format(new Date(project.updatedAt), 'dd/MM/yyyy à HH:mm', { locale: fr })}
+                          {safeFormatDate(project.updatedAt, 'dd/MM/yyyy à HH:mm')}
                         </p>
                       </div>
                     </div>
@@ -795,7 +855,15 @@ const ProjectDetailPage: FC = () => {
           <>
             {bordereaux && bordereaux.length > 0 ? (
               /* Afficher directement le BordereauTable */
-              <BordereauTable bordereauId={bordereaux[0].id} onClose={() => setActiveTab('overview')} />
+              <BordereauTable 
+                bordereauId={bordereaux[0].id} 
+                onClose={() => setActiveTab('overview')} 
+                onSaved={() => {
+                  // Refresh project data after bordereau saved (montant updated)
+                  refreshProject();
+                  refreshBordereaux();
+                }}
+              />
             ) : (
               /* Afficher les options de création */
               <div className="card">
@@ -868,89 +936,121 @@ const ProjectDetailPage: FC = () => {
         {activeTab === 'metre' && (
           <>
             {bordereaux && bordereaux.length > 0 ? (
-              <div className="card">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold text-gray-900">Métrés du projet</h3>
-                  <div className="flex gap-2">
+              <div className="space-y-4">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    Métrés ({periodes?.length || 0})
+                  </h2>
+                  {periodes && periodes.length > 0 && (
                     <button
-                      onClick={() => navigate(`/projects/${id}/metre-v3`)}
-                      className="btn btn-secondary inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600 border-0"
-                    >
-                      <TrendingUp className="w-4 h-4" />
-                      Métré V3 (Hiérarchique)
-                    </button>
-                    <button
-                      onClick={() => navigate(`/projects/${id}/metre`)}
+                      onClick={handleCreateNewMetre}
                       className="btn btn-primary inline-flex items-center gap-2"
                     >
-                      <TrendingUp className="w-4 h-4" />
-                      Gérer les métrés
+                      <Plus className="w-4 h-4" />
+                      Nouveau métré
                     </button>
-                  </div>
+                  )}
                 </div>
 
-                {aggregatedMetres && aggregatedMetres.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50 border-b-2 border-gray-200">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Référence</th>
-                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Désignation</th>
-                          <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Unité</th>
-                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Qté Partielle</th>
-                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Qté Cumulée</th>
-                          <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">% Réalisation</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {aggregatedMetres.map((metre) => (
-                          <tr key={metre.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-gray-700">{metre.reference}</td>
-                            <td className="px-4 py-3 text-gray-900">{metre.designationBordereau}</td>
-                            <td className="px-4 py-3 text-center">
-                              <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium">
-                                {metre.unite}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-right font-medium text-gray-900">
-                              {Number(metre.totalPartiel || 0).toFixed(2)}
-                            </td>
-                            <td className="px-4 py-3 text-right font-medium text-primary-600">
-                              {Number(metre.totalCumule || 0).toFixed(2)}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-                                  <div
-                                    className={`h-full transition-all duration-300 ${
-                                      metre.pourcentageRealisation >= 100
-                                        ? 'bg-green-500'
-                                        : metre.pourcentageRealisation >= 75
-                                        ? 'bg-blue-500'
-                                        : metre.pourcentageRealisation >= 50
-                                        ? 'bg-yellow-500'
-                                        : 'bg-orange-500'
-                                    }`}
-                                    style={{ width: `${Math.min(metre.pourcentageRealisation, 100)}%` }}
-                                  />
+                {periodes && periodes.length > 0 ? (
+                  <div className="grid gap-4">
+                    {periodes
+                      .sort((a: any, b: any) => b.numero - a.numero)
+                      .map((periode: any) => {
+                        // 🔴 FIX: حساب المجموع التراكمي الصحيح
+                        // = مجموع كل الميتريات من الفترة 1 إلى هذه الفترة
+                        const allPreviousAndCurrentMetres = metres?.filter((m: any) => {
+                          const metrePeriode = periodes?.find((p: any) => {
+                            const cleanPId = (p.id || '').replace('periode:', '');
+                            const cleanMPId = (m.periodeId || '').replace('periode:', '');
+                            return cleanPId === cleanMPId;
+                          });
+                          return metrePeriode && metrePeriode.numero <= periode.numero;
+                        }) || [];
+                        
+                        // حساب المجموع التراكمي من كل الفترات السابقة + الحالية
+                        const totalCumule = allPreviousAndCurrentMetres.reduce((sum: number, m: any) => {
+                          const value = Number(m.totalPartiel) || 0;
+                          return sum + value;
+                        }, 0);
+                        
+                        // عدد المقالات في هذه الفترة فقط
+                        const cleanPeriodeId = (periode.id || '').replace('periode:', '');
+                        const periodeMetres = metres?.filter((m: any) => {
+                          const metreCleanPeriodeId = (m.periodeId || '').replace('periode:', '');
+                          return metreCleanPeriodeId === cleanPeriodeId;
+                        }) || [];
+                        
+                        return (
+                          <div
+                            key={periode.id}
+                            className="card hover:shadow-md transition-shadow cursor-pointer"
+                            onClick={() => navigate(`/projects/${rawId}/metre/${periode.id.replace('periode:', '')}`)}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-primary-100">
+                                  <TrendingUp className="w-6 h-6 text-primary-600" />
                                 </div>
-                                <span className="text-xs font-medium text-gray-700 w-12 text-right">
-                                  {Number(metre.pourcentageRealisation || 0).toFixed(0)}%
-                                </span>
+                                <div>
+                                  <h3 className="font-semibold text-gray-900">
+                                    Métré N° {periode.numero}
+                                  </h3>
+                                  <p className="text-sm text-gray-500">
+                                    {periode.libelle || `Période ${periode.numero}`}
+                                  </p>
+                                </div>
                               </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                              
+                              <div className="flex items-center gap-6">
+                                <div className="text-right">
+                                  <p className="text-sm text-gray-500">Total Cumulé</p>
+                                  <p className="font-semibold text-gray-900">
+                                    {totalCumule.toFixed(2)}
+                                  </p>
+                                </div>
+                                
+                                <div className="text-right">
+                                  <p className="text-sm text-gray-500">Articles</p>
+                                  <p className="font-semibold text-primary-600">
+                                    {periodeMetres.length}
+                                  </p>
+                                </div>
+                                
+                                <div className="text-right">
+                                  <p className="text-sm text-gray-500">Date</p>
+                                  <p className="text-sm text-gray-700">
+                                    {safeFormatDate(periode.createdAt, 'dd/MM/yyyy')}
+                                  </p>
+                                </div>
+                                
+                                <ChevronRight className="w-5 h-5 text-gray-400" />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                   </div>
                 ) : (
-                  <div className="text-center py-8">
-                    <TrendingUp className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                    <p className="text-gray-600">Aucun métré créé</p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Cliquez sur "Gérer les métrés" pour commencer
-                    </p>
+                  <div className="card">
+                    <div className="text-center py-12">
+                      <TrendingUp className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">Aucun métré créé</h3>
+                      <p className="text-gray-600 mb-6">
+                        Créez votre premier métré pour commencer à mesurer les travaux
+                      </p>
+                      <button
+                        onClick={handleCreateNewMetre}
+                        className="btn btn-primary inline-flex items-center gap-2 px-6 py-3"
+                      >
+                        <Plus className="w-5 h-5" />
+                        Créer le premier métré
+                      </button>
+                      <p className="text-xs text-gray-500 mt-3">
+                        Un décompte sera créé automatiquement avec le métré
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -987,16 +1087,35 @@ const ProjectDetailPage: FC = () => {
             {decompts && decompts.length > 0 ? (
               <div className="grid gap-4">
                 {decompts
-                  .sort((a, b) => b.numero - a.numero)
-                  .map((decompt) => {
-                    const periode = periodes?.find(p => p.id === decompt.periodeId);
-                    const isLast = periode?.isDecompteDernier;
+                  .sort((a: any, b: any) => b.numero - a.numero)
+                  .map((decompt: any) => {
+                    // 🔴 Normalize periodeId comparison
+                    const cleanDecomptPeriodeId = (decompt.periodeId || '').replace('periode:', '');
+                    const periode = periodes?.find((p: any) => {
+                      const cleanPeriodeId = (p.id || '').replace('periode:', '');
+                      return cleanPeriodeId === cleanDecomptPeriodeId;
+                    });
+                    const isLast = (periode as any)?.isDecompteDernier;
+                    
+                    // 🔴 Debug log
+                    console.log('📋 Décompte click target:', {
+                      decomptId: decompt.id,
+                      periodeId: decompt.periodeId,
+                      cleanPeriodeId: cleanDecomptPeriodeId,
+                      navigateTo: `/projects/${rawId}/decompte/${cleanDecomptPeriodeId}`
+                    });
                     
                     return (
                       <div
                         key={decompt.id}
                         className="card hover:shadow-md transition-shadow cursor-pointer"
-                        onClick={() => navigate(`/projects/${id}/decompte`)}
+                        onClick={() => {
+                          if (cleanDecomptPeriodeId) {
+                            navigate(`/projects/${rawId}/decompte/${cleanDecomptPeriodeId}`);
+                          } else {
+                            console.error('❌ Missing periodeId for décompte:', decompt);
+                          }
+                        }}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-4">
@@ -1015,7 +1134,7 @@ const ProjectDetailPage: FC = () => {
                                 )}
                               </h3>
                               <p className="text-sm text-gray-500">
-                                {periode ? `${periode.libelle}` : 'Période non trouvée'}
+                                {periode ? `${(periode as any).libelle || `Période ${periode.numero}`}` : 'Période non trouvée'}
                               </p>
                             </div>
                           </div>
@@ -1024,7 +1143,7 @@ const ProjectDetailPage: FC = () => {
                             <div className="text-right">
                               <p className="text-sm text-gray-500">Montant HT</p>
                               <p className="font-semibold text-gray-900">
-                                {decompt.montantTotal?.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} MAD
+                                {(decompt.montantTotal || decompt.montantHT || 0)?.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} MAD
                               </p>
                             </div>
                             
@@ -1045,7 +1164,7 @@ const ProjectDetailPage: FC = () => {
                             <div className="text-right">
                               <p className="text-sm text-gray-500">Date</p>
                               <p className="text-sm text-gray-700">
-                                {format(new Date(decompt.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                                {safeFormatDate(periode?.dateFin || decompt.createdAt, 'dd/MM/yyyy')}
                               </p>
                             </div>
                             
@@ -1078,51 +1197,27 @@ const ProjectDetailPage: FC = () => {
         )}
 
         {activeTab === 'photos' && (
-          <div className="card">
-            <div className="text-center py-12">
-              <Image className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Aucune photo</h3>
-              <p className="text-gray-600 mb-4">
-                Ajoutez des photos pour documenter l'avancement du projet
-              </p>
-              <button className="btn btn-primary inline-flex items-center gap-2">
-                <Image className="w-4 h-4" />
-                Ajouter des photos
-              </button>
-            </div>
-          </div>
+          <PhotosTab 
+            projectId={rawId!} 
+            photos={projectPhotos} 
+            onRefresh={loadAssets} 
+          />
         )}
 
         {activeTab === 'pv' && (
-          <div className="card">
-            <div className="text-center py-12">
-              <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Aucun PV</h3>
-              <p className="text-gray-600 mb-4">
-                Gérez vos procès-verbaux (installation, réception, constat...)
-              </p>
-              <button className="btn btn-primary inline-flex items-center gap-2">
-                <FileText className="w-4 h-4" />
-                Créer un PV
-              </button>
-            </div>
-          </div>
+          <PVTab 
+            projectId={rawId!} 
+            pvs={projectPVs} 
+            onRefresh={loadAssets} 
+          />
         )}
 
         {activeTab === 'documents' && (
-          <div className="card">
-            <div className="text-center py-12">
-              <Paperclip className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Aucun document</h3>
-              <p className="text-gray-600 mb-4">
-                Attachez vos factures, plans, et autres documents importants
-              </p>
-              <button className="btn btn-primary inline-flex items-center gap-2">
-                <Paperclip className="w-4 h-4" />
-                Joindre un document
-              </button>
-            </div>
-          </div>
+          <DocumentsTab 
+            projectId={rawId!} 
+            documents={projectDocuments} 
+            onRefresh={loadAssets} 
+          />
         )}
       </div>
 

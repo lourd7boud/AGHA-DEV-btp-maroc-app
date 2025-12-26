@@ -6,7 +6,7 @@ import {
   getMetreById,
   updateMetre,
   deleteMetre,
-} from '../controllers/metre.controller.pg';
+} from '../controllers/metre.controller';
 
 const router = Router();
 router.use(authenticate);

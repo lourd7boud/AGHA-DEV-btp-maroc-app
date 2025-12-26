@@ -1,6 +1,5 @@
-import { FC, useState, useEffect } from 'react';
+import { FC, useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAuthStore } from '../store/authStore';
 import {
@@ -21,8 +20,28 @@ import {
   TemplateLibraryModal,
   CopyFromProjectModal,
 } from '../components/bordereau';
+import { isWeb } from '../utils/platform';
+import { apiService } from '../services/apiService';
 
 type CreateMode = 'blank' | 'template' | 'copy' | 'import' | null;
+
+// Local interfaces for this page
+interface Project {
+  id: string;
+  objet: string;
+  marcheNo: string;
+  annee: string;
+}
+
+interface Bordereau {
+  id: string;
+  projectId: string;
+  reference: string;
+  designation: string;
+  lignes: any[];
+  montantTotal: number;
+  deletedAt?: string;
+}
 
 const BordereauPage: FC = () => {
 
@@ -30,29 +49,65 @@ const BordereauPage: FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const [createMode, setCreateMode] = useState<CreateMode>(null);
+  
+  // State for data
+  const [project, setProject] = useState<Project | null>(null);
+  const [bordereaux, setBordereaux] = useState<Bordereau[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Normalize ID - ensure it has the 'project:' prefix
+  // Raw ID without prefix for API calls
+  const rawId = rawProjectId?.includes(':') ? rawProjectId.split(':').pop()! : rawProjectId;
+  
+  // Normalized ID with prefix for navigation
   const projectId = rawProjectId?.includes(':') ? rawProjectId : `project:${rawProjectId}`;
 
-  const project = useLiveQuery(
-    () => db.projects.get(projectId),
-    [projectId]
-  );
+  // Fetch project data
+  const fetchProject = useCallback(async () => {
+    if (!rawId) return;
+    try {
+      console.log(`🌐 [BordereauPage] Fetching project ${rawId}...`);
+      const response = await apiService.getProject(rawId);
+      const data = response.data || response;
+      setProject(data);
+      console.log(`✅ [BordereauPage] Loaded project`, data);
+    } catch (err) {
+      console.error(`❌ [BordereauPage] Failed to fetch project:`, err);
+    }
+  }, [rawId]);
 
-  const bordereau = useLiveQuery(
-    () =>
-      db.bordereaux
-        .where('projectId')
-        .equals(projectId)
-        .and((b) => !b.deletedAt)
-        .first(),
-    [projectId]
-  );
+  // Fetch bordereaux data
+  const fetchBordereaux = useCallback(async () => {
+    if (!rawId) return;
+    try {
+      console.log(`🌐 [BordereauPage] Fetching bordereaux for ${rawId}...`);
+      const response = await apiService.getBordereaux(rawId);
+      const data = (response.data || response) as Bordereau[];
+      const filtered = data.filter(b => !b.deletedAt);
+      setBordereaux(filtered);
+      console.log(`✅ [BordereauPage] Loaded ${filtered.length} bordereaux`);
+    } catch (err) {
+      console.error(`❌ [BordereauPage] Failed to fetch bordereaux:`, err);
+    }
+  }, [rawId]);
+
+  // Initial load
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      await Promise.all([fetchProject(), fetchBordereaux()]);
+      setIsLoading(false);
+    };
+    loadData();
+  }, [fetchProject, fetchBordereaux]);
+
+  // Get first bordereau
+  const bordereau = bordereaux[0] || null;
 
   const handleCreateBlank = async (data: { reference: string; designation: string }) => {
     if (!user || !projectId) return;
 
     const bordereauId = `bordereau:${uuidv4()}`;
+    const rawBordereauId = bordereauId.replace('bordereau:', '');
     const now = new Date().toISOString();
 
     const newBordereau = {
@@ -67,42 +122,56 @@ const BordereauPage: FC = () => {
       updatedAt: now,
     };
 
-    await db.bordereaux.add(newBordereau);
-    await logSyncOperation('CREATE', 'bordereau', bordereauId.replace('bordereau:', ''), newBordereau, user.id);
+    if (isWeb()) {
+      // Web: use API directly
+      try {
+        console.log('📤 [BordereauPage] Creating bordereau...');
+        await apiService.createBordereau({
+          projectId: rawId,
+          reference: data.reference,
+          designation: data.designation,
+          lignes: [],
+          montantTotal: 0,
+        });
+        console.log('✅ [BordereauPage] Bordereau created, refreshing...');
+        await fetchBordereaux();
+        console.log('✅ [BordereauPage] Refresh completed');
+      } catch (error) {
+        console.error('❌ [BordereauPage] Failed to create bordereau:', error);
+        throw error;
+      }
+    } else {
+      // Electron: use IndexedDB + sync
+      await db.bordereaux.add(newBordereau);
+      await logSyncOperation('CREATE', 'bordereau', rawBordereauId, newBordereau, user.id);
+    }
 
     setCreateMode(null);
   };
 
-  // Handle loading timeout
-  const [loadingTimeout, setLoadingTimeout] = useState(false);
-  
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (!project) setLoadingTimeout(true);
-    }, 5000);
-    return () => clearTimeout(timer);
-  }, [project]);
-
-  if (!project) {
-    if (loadingTimeout) {
-      return (
-        <div className="flex items-center justify-center min-h-96">
-          <div className="text-center">
-            <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
-            <p className="text-gray-700 font-medium mb-2">Projet non trouvé</p>
-            <p className="text-gray-500 text-sm mb-4">Synchronisez les données ou vérifiez l'URL</p>
-            <button onClick={() => navigate('/projects')} className="btn btn-primary">
-              Retour aux projets
-            </button>
-          </div>
-        </div>
-      );
-    }
+  // Show loading only while actually loading
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-500">Chargement...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error if project not found after loading
+  if (!project) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
+          <p className="text-gray-700 font-medium mb-2">Projet non trouvé</p>
+          <p className="text-gray-500 text-sm mb-4">Synchronisez les données ou vérifiez l'URL</p>
+          <button onClick={() => navigate('/projects')} className="btn btn-primary">
+            Retour aux projets
+          </button>
         </div>
       </div>
     );
@@ -131,7 +200,15 @@ const BordereauPage: FC = () => {
 
       {/* Si bordereau existe, l'afficher directement */}
       {bordereau ? (
-        <BordereauTable bordereauId={bordereau.id} onClose={() => navigate(`/projects/${projectId}`)} />
+        <BordereauTable 
+          bordereauId={bordereau.id} 
+          onClose={() => navigate(`/projects/${projectId}`)} 
+          onSaved={() => {
+            // Refresh data after bordereau saved
+            fetchProject();
+            fetchBordereaux();
+          }}
+        />
       ) : (
         /* Sinon, afficher les options de création */
         <div className="card">
@@ -209,7 +286,11 @@ const BordereauPage: FC = () => {
         <TemplateLibraryModal
           projectId={projectId!}
           onClose={() => setCreateMode(null)}
-          onCreated={() => setCreateMode(null)}
+          onCreated={async () => {
+            console.log('📥 [BordereauPage] Template created, refreshing...');
+            await fetchBordereaux();
+            setCreateMode(null);
+          }}
         />
       )}
 
@@ -217,7 +298,11 @@ const BordereauPage: FC = () => {
         <CopyFromProjectModal
           currentProjectId={projectId!}
           onClose={() => setCreateMode(null)}
-          onCopied={() => setCreateMode(null)}
+          onCopied={async () => {
+            console.log('📥 [BordereauPage] Copy created, refreshing...');
+            await fetchBordereaux();
+            setCreateMode(null);
+          }}
         />
       )}
 
@@ -225,7 +310,11 @@ const BordereauPage: FC = () => {
         <ImportExcelModal
           projectId={projectId!}
           onClose={() => setCreateMode(null)}
-          onImported={() => setCreateMode(null)}
+          onImported={async () => {
+            console.log('📥 [BordereauPage] Import created, refreshing...');
+            await fetchBordereaux();
+            setCreateMode(null);
+          }}
         />
       )}
     </div>

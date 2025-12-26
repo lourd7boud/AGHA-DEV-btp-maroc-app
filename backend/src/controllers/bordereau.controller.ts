@@ -1,83 +1,106 @@
 import { Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { getCouchDB } from '../config/database';
+import { getPool } from '../config/postgres';
 import { ApiError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-import { Bordereau } from '../models/types';
+import logger from '../utils/logger';
 
+/**
+ * Create bordereau (PostgreSQL version)
+ */
 export const createBordereau = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    console.log('=== BORDEREAU CREATE REQUEST ===');
+    logger.info('Creating bordereau...');
+    
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
-    const { projectId, reference, designation, unite, quantite, prixUnitaire } = req.body;
+    const { projectId, lignes } = req.body;
 
-    if (!projectId || !reference || !designation || !unite || quantite === undefined) {
-      throw new ApiError('Required fields missing', 400);
+    if (!projectId) {
+      throw new ApiError('Project ID required', 400);
     }
 
-    const db = getCouchDB();
-    const montantTotal = quantite * (prixUnitaire || 0);
+    const pool = getPool();
+    const bordereauId = uuidv4();
 
-    const bordereau: Bordereau = {
-      _id: `bordereau:${uuidv4()}`,
-      projectId,
-      userId: req.user.id,
-      reference,
-      designation,
-      unite,
-      quantite: parseFloat(quantite),
-      prixUnitaire: parseFloat(prixUnitaire) || 0,
-      montantTotal,
-      metreIds: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    // Check project exists and belongs to user
+    const projectCheck = await pool.query(
+      'SELECT id FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL',
+      [projectId, req.user.id]
+    );
 
-    const result = await db.insert({ ...bordereau, type: 'bordereau' });
+    if (projectCheck.rows.length === 0) {
+      throw new ApiError('Project not found or not authorized', 404);
+    }
+
+    const result = await pool.query(
+      `INSERT INTO bordereaux (id, project_id, lignes, created_at, updated_at)
+       VALUES ($1, $2, $3, NOW(), NOW())
+       RETURNING *`,
+      [bordereauId, projectId, JSON.stringify(lignes || [])]
+    );
+
+    logger.info(`Bordereau created: ${bordereauId}`);
 
     res.status(201).json({
       success: true,
-      data: { ...bordereau, _rev: result.rev },
+      data: result.rows[0],
     });
   } catch (error) {
+    logger.error('Error creating bordereau:', error);
     next(error);
   }
 };
 
+/**
+ * Get all bordereaux for a project (PostgreSQL version)
+ */
 export const getBordereaux = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    console.log('=== BORDEREAU GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;
-    const db = getCouchDB();
+    const pool = getPool();
 
-    const result = await db.find({
-      selector: {
-        type: 'bordereau',
-        projectId,
-        userId: req.user.id,
-        deletedAt: { $exists: false },
-      },
-    });
+    // Verify project ownership
+    const projectCheck = await pool.query(
+      'SELECT id FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL',
+      [projectId, req.user.id]
+    );
+
+    if (projectCheck.rows.length === 0) {
+      throw new ApiError('Project not found or not authorized', 404);
+    }
+
+    const result = await pool.query(
+      `SELECT * FROM bordereaux WHERE project_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC`,
+      [projectId]
+    );
 
     res.json({
       success: true,
-      data: result.docs,
-      count: result.docs.length,
+      data: result.rows,
+      count: result.rows.length,
     });
   } catch (error) {
+    logger.error('Error fetching bordereaux:', error);
     next(error);
   }
 };
 
+/**
+ * Get bordereau by ID (PostgreSQL version)
+ */
 export const getBordereauById = async (
   req: AuthRequest,
   res: Response,
@@ -87,23 +110,31 @@ export const getBordereauById = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const bordereau = await db.get(`bordereau:${id}`);
+    const pool = getPool();
 
-    if (bordereau.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    const result = await pool.query(
+      `SELECT b.* FROM bordereaux b
+       INNER JOIN projects p ON b.project_id = p.id
+       WHERE b.id = $1 AND p.user_id = $2 AND b.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new ApiError('Bordereau not found', 404);
     }
 
-    res.json({ success: true, data: bordereau });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('Bordereau not found', 404));
-    } else {
-      next(error);
-    }
+    res.json({
+      success: true,
+      data: result.rows[0],
+    });
+  } catch (error) {
+    next(error);
   }
 };
 
+/**
+ * Update bordereau (PostgreSQL version)
+ */
 export const updateBordereau = async (
   req: AuthRequest,
   res: Response,
@@ -113,39 +144,55 @@ export const updateBordereau = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const bordereau = await db.get(`bordereau:${id}`);
+    const { lignes, montantTotal } = req.body;
+    const pool = getPool();
 
-    if (bordereau.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    // Check ownership
+    const existing = await pool.query(
+      `SELECT b.* FROM bordereaux b
+       INNER JOIN projects p ON b.project_id = p.id
+       WHERE b.id = $1 AND p.user_id = $2 AND b.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (existing.rows.length === 0) {
+      throw new ApiError('Bordereau not found', 404);
     }
 
-    const updated = {
-      ...bordereau,
-      ...req.body,
-      updatedAt: new Date(),
-    };
+    const bordereau = existing.rows[0];
 
-    // Recalculer le montant total si nécessaire
-    if (updated.quantite && updated.prixUnitaire) {
-      updated.montantTotal = updated.quantite * updated.prixUnitaire;
-    }
+    // Calculate montant TTC from lignes (HT + 20% TVA)
+    const calculatedMontantHT = (lignes || []).reduce((sum: number, ligne: any) => {
+      return sum + (Number(ligne.montant) || 0);
+    }, 0);
+    const calculatedMontantTTC = calculatedMontantHT * 1.2;
 
-    const result = await db.insert(updated);
+    // Update bordereau with lignes and montantTotal
+    const result = await pool.query(
+      `UPDATE bordereaux SET lignes = $1, montant_total = $2, updated_at = NOW() WHERE id = $3 RETURNING *`,
+      [JSON.stringify(lignes || []), montantTotal || calculatedMontantHT, id]
+    );
+
+    // Update project's montant with TTC value
+    await pool.query(
+      `UPDATE projects SET montant = $1, updated_at = NOW() WHERE id = $2`,
+      [calculatedMontantTTC, bordereau.project_id]
+    );
+
+    logger.info(`Bordereau updated: ${id}, Project montant updated to: ${calculatedMontantTTC}`);
 
     res.json({
       success: true,
-      data: { ...updated, _rev: result.rev },
+      data: result.rows[0],
     });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('Bordereau not found', 404));
-    } else {
-      next(error);
-    }
+  } catch (error) {
+    next(error);
   }
 };
 
+/**
+ * Delete bordereau (PostgreSQL version)
+ */
 export const deleteBordereau = async (
   req: AuthRequest,
   res: Response,
@@ -155,26 +202,32 @@ export const deleteBordereau = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const bordereau = await db.get(`bordereau:${id}`);
+    const pool = getPool();
 
-    if (bordereau.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    // Check ownership
+    const existing = await pool.query(
+      `SELECT b.* FROM bordereaux b
+       INNER JOIN projects p ON b.project_id = p.id
+       WHERE b.id = $1 AND p.user_id = $2 AND b.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (existing.rows.length === 0) {
+      throw new ApiError('Bordereau not found', 404);
     }
 
-    bordereau.deletedAt = new Date();
-    bordereau.updatedAt = new Date();
-    await db.insert(bordereau);
+    await pool.query(
+      `UPDATE bordereaux SET deleted_at = NOW() WHERE id = $1`,
+      [id]
+    );
+
+    logger.info(`Bordereau deleted: ${id}`);
 
     res.json({
       success: true,
       message: 'Bordereau deleted successfully',
     });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('Bordereau not found', 404));
-    } else {
-      next(error);
-    }
+  } catch (error) {
+    next(error);
   }
 };

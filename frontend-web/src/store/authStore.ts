@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { apiService } from '../services/apiService';
 import { db, User } from '../db/database';
+import { isWeb } from '../utils/platform';
 
 interface AuthState {
   user: User | null;
@@ -15,6 +16,29 @@ interface AuthState {
   checkAuth: () => Promise<void>;
   refreshToken: () => Promise<boolean>;
 }
+
+/**
+ * Clear all cached data from IndexedDB (for Web server-first mode)
+ */
+const clearAllCache = async () => {
+  console.log('🗑️ [WEB] Clearing all cached data for server-first mode...');
+  try {
+    // Clear tables individually to avoid Dexie transaction limits
+    await db.projects.clear();
+    await db.bordereaux.clear();
+    await db.metres.clear();
+    await db.decompts.clear();
+    await db.periodes.clear();
+    await db.pvs.clear();
+    await db.photos.clear();
+    await db.attachments.clear();
+    await db.syncOperations.clear();
+    
+    console.log('✅ [WEB] Cache cleared successfully');
+  } catch (error) {
+    console.error('❌ [WEB] Failed to clear cache:', error);
+  }
+};
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -33,7 +57,13 @@ export const useAuthStore = create<AuthState>()(
 
           // Clear lastSyncTimestamp to force full sync on login
           localStorage.removeItem('lastSyncTimestamp');
+          localStorage.removeItem('sync-server-seq');
           console.log('🔄 Cleared lastSyncTimestamp for full sync');
+
+          // WEB MODE: Clear all cached data on login for server-first behavior
+          if (isWeb()) {
+            await clearAllCache();
+          }
 
           // Check trial expiration
           if (user.trialEndDate && new Date(user.trialEndDate) < new Date()) {
@@ -141,7 +171,20 @@ export const useAuthStore = create<AuthState>()(
       },
 
       checkAuth: async () => {
-        const token = localStorage.getItem('authToken');
+        // First check localStorage (most reliable)
+        let token = localStorage.getItem('authToken');
+        
+        // If not in localStorage, check zustand persisted state (backup)
+        if (!token) {
+          const currentState = get();
+          token = currentState.token;
+          
+          // If found in state but not localStorage, restore it
+          if (token) {
+            localStorage.setItem('authToken', token);
+            console.log('🔄 Restored authToken to localStorage from state');
+          }
+        }
         
         if (!token) {
           console.log('🔒 No token found, setting initialized');
@@ -168,7 +211,47 @@ export const useAuthStore = create<AuthState>()(
           console.log('✅ Auth check successful for user:', user.email);
           set({ user, token: latestToken, error: null, isInitialized: true, isLoading: false });
         } catch (error: any) {
-          console.log('🔒 Auth check failed:', error.response?.status || error.message);
+          const status = error.response?.status;
+          console.log('🔒 Auth check failed:', status || error.message);
+          
+          // CRITICAL: Server errors (500, 502, 503) should NOT invalidate session
+          // User should remain logged in with cached data (offline mode)
+          if (status && status >= 500) {
+            console.warn('⚠️ Server error during auth check - preserving session for offline mode');
+            // Keep the user logged in with existing data from IndexedDB
+            const cachedUser = currentState.user;
+            if (cachedUser) {
+              set({ user: cachedUser, token, error: null, isInitialized: true, isLoading: false });
+            } else {
+              // Try to get user from IndexedDB
+              try {
+                const users = await db.users.toArray();
+                const dbUser = users.find(u => u.token === token);
+                if (dbUser) {
+                  console.log('✅ Using cached user from IndexedDB for offline mode');
+                  set({ user: dbUser as any, token, error: null, isInitialized: true, isLoading: false });
+                } else {
+                  // No cached user, but don't logout - let them work offline
+                  set({ user: null, token, error: 'Server indisponible - mode hors ligne', isInitialized: true, isLoading: false });
+                }
+              } catch (dbError) {
+                set({ user: null, token, error: 'Server indisponible - mode hors ligne', isInitialized: true, isLoading: false });
+              }
+            }
+            return;
+          }
+          
+          // Network error - also preserve session for offline mode
+          if (!error.response && (error.code === 'ERR_NETWORK' || error.message === 'Network Error')) {
+            console.warn('⚠️ Network error - preserving session for offline mode');
+            const cachedUser = currentState.user;
+            if (cachedUser) {
+              set({ user: cachedUser, token, error: null, isInitialized: true, isLoading: false });
+            } else {
+              set({ user: null, token, error: 'Hors ligne', isInitialized: true, isLoading: false });
+            }
+            return;
+          }
           
           // The apiService interceptor will handle token refresh and logout
           // Only clear state if we don't have a token anymore (interceptor logged out)
@@ -185,7 +268,16 @@ export const useAuthStore = create<AuthState>()(
               const retryToken = localStorage.getItem('authToken') || token;
               console.log('✅ Retry successful for user:', retryUser.email);
               set({ user: retryUser, token: retryToken, error: null, isInitialized: true, isLoading: false });
-            } catch (retryError) {
+            } catch (retryError: any) {
+              const retryStatus = retryError.response?.status;
+              
+              // Again, don't logout on server errors
+              if (retryStatus && retryStatus >= 500) {
+                console.warn('⚠️ Server still down - preserving session');
+                set({ user: currentState.user, token: currentToken, error: 'Server indisponible', isInitialized: true, isLoading: false });
+                return;
+              }
+              
               console.log('🔒 Retry also failed, clearing state');
               localStorage.removeItem('authToken');
               localStorage.removeItem('auth-storage');
@@ -201,6 +293,17 @@ export const useAuthStore = create<AuthState>()(
       // CRITICAL: Do NOT persist isInitialized - it must be false on page load
       // Only persist user and token
       partialize: (state) => ({ user: state.user, token: state.token }),
+      // Ensure authToken in localStorage is synced when rehydrated
+      onRehydrateStorage: () => (state) => {
+        if (state?.token) {
+          // Sync token to localStorage if present in state
+          const storedToken = localStorage.getItem('authToken');
+          if (!storedToken || storedToken !== state.token) {
+            localStorage.setItem('authToken', state.token);
+            console.log('🔄 Synced authToken to localStorage on rehydrate');
+          }
+        }
+      },
     }
   )
 );

@@ -8,7 +8,7 @@ import {
   getProjectStructure,
   getDeletedProjects,
   restoreProject,
-} from '../controllers/project.controller.pg';
+} from '../controllers/project.controller';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();

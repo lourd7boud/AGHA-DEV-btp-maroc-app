@@ -2,17 +2,23 @@ import { Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs/promises';
-import { getCouchDB } from '../config/database';
+import { getPool } from '../config/postgres';
 import { ApiError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-import { Photo } from '../models/types';
+import logger from '../utils/logger';
 
+/**
+ * Upload photo (PostgreSQL version)
+ */
 export const uploadPhoto = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    console.log('=== PHOTO UPLOAD REQUEST ===');
+    logger.info('Uploading photo...');
+    
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     if (!req.file) {
@@ -25,86 +31,112 @@ export const uploadPhoto = async (
       throw new ApiError('Project ID required', 400);
     }
 
-    const db = getCouchDB();
+    const pool = getPool();
 
-    // Récupérer le projet pour obtenir le folderPath
-    const project = await db.get(`project:${projectId}`);
+    // Verify project ownership
+    const project = await pool.query(
+      'SELECT id, folder_path FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL',
+      [projectId, req.user.id]
+    );
 
-    if (project.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    if (project.rows.length === 0) {
+      throw new ApiError('Project not found or not authorized', 404);
     }
 
-    // Déplacer le fichier vers le dossier du projet
+    const folderPath = project.rows[0].folder_path;
+
+    // Move file to project folder
     const destPath = path.join(
       process.cwd(),
       'uploads',
-      project.folderPath,
+      folderPath,
       'Photo',
       req.file.filename
     );
 
+    // Ensure directory exists
+    await fs.mkdir(path.dirname(destPath), { recursive: true });
     await fs.rename(req.file.path, destPath);
 
-    const photo: Photo = {
-      _id: `photo:${uuidv4()}`,
-      projectId,
-      userId: req.user.id,
-      fileName: req.file.originalname,
-      filePath: `/uploads/${project.folderPath}/Photo/${req.file.filename}`,
-      fileSize: req.file.size,
-      mimeType: req.file.mimetype,
-      description: description || '',
-      tags: tags ? JSON.parse(tags) : [],
-      location:
-        latitude && longitude
-          ? { latitude: parseFloat(latitude), longitude: parseFloat(longitude) }
-          : undefined,
-      syncStatus: 'synced',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const photoId = uuidv4();
+    const filePath = `/uploads/${folderPath}/Photo/${req.file.filename}`;
 
-    const result = await db.insert({ ...photo, type: 'photo' });
+    const result = await pool.query(
+      `INSERT INTO photos (
+        id, project_id, file_name, file_path, file_size, mime_type,
+        description, tags, latitude, longitude, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+       RETURNING *`,
+      [
+        photoId,
+        projectId,
+        req.file.originalname,
+        filePath,
+        req.file.size,
+        req.file.mimetype,
+        description || '',
+        tags ? JSON.parse(tags) : [],
+        latitude ? parseFloat(latitude) : null,
+        longitude ? parseFloat(longitude) : null
+      ]
+    );
+
+    logger.info(`Photo uploaded: ${photoId}`);
 
     res.status(201).json({
       success: true,
-      data: { ...photo, _rev: result.rev },
+      data: result.rows[0],
     });
   } catch (error) {
+    logger.error('Error uploading photo:', error);
     next(error);
   }
 };
 
+/**
+ * Get all photos for a project (PostgreSQL version)
+ */
 export const getPhotos = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    console.log('=== PHOTOS GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;
-    const db = getCouchDB();
+    const pool = getPool();
 
-    const result = await db.find({
-      selector: {
-        type: 'photo',
-        projectId,
-        userId: req.user.id,
-        deletedAt: { $exists: false },
-      },
-    });
+    // Verify project ownership
+    const projectCheck = await pool.query(
+      'SELECT id FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL',
+      [projectId, req.user.id]
+    );
+
+    if (projectCheck.rows.length === 0) {
+      throw new ApiError('Project not found or not authorized', 404);
+    }
+
+    const result = await pool.query(
+      `SELECT * FROM photos WHERE project_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC`,
+      [projectId]
+    );
 
     res.json({
       success: true,
-      data: result.docs,
-      count: result.docs.length,
+      data: result.rows,
+      count: result.rows.length,
     });
   } catch (error) {
+    logger.error('Error fetching photos:', error);
     next(error);
   }
 };
 
+/**
+ * Get photo by ID (PostgreSQL version)
+ */
 export const getPhotoById = async (
   req: AuthRequest,
   res: Response,
@@ -114,23 +146,31 @@ export const getPhotoById = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const photo = await db.get(`photo:${id}`);
+    const pool = getPool();
 
-    if (photo.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    const result = await pool.query(
+      `SELECT ph.* FROM photos ph
+       INNER JOIN projects p ON ph.project_id = p.id
+       WHERE ph.id = $1 AND p.user_id = $2 AND ph.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new ApiError('Photo not found', 404);
     }
 
-    res.json({ success: true, data: photo });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('Photo not found', 404));
-    } else {
-      next(error);
-    }
+    res.json({
+      success: true,
+      data: result.rows[0],
+    });
+  } catch (error) {
+    next(error);
   }
 };
 
+/**
+ * Delete photo (PostgreSQL version)
+ */
 export const deletePhoto = async (
   req: AuthRequest,
   res: Response,
@@ -140,34 +180,41 @@ export const deletePhoto = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const photo = await db.get(`photo:${id}`);
+    const pool = getPool();
 
-    if (photo.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    // Check ownership and get file path
+    const existing = await pool.query(
+      `SELECT ph.* FROM photos ph
+       INNER JOIN projects p ON ph.project_id = p.id
+       WHERE ph.id = $1 AND p.user_id = $2 AND ph.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (existing.rows.length === 0) {
+      throw new ApiError('Photo not found', 404);
     }
 
-    // Supprimer le fichier physique
-    const filePath = path.join(process.cwd(), photo.filePath);
+    // Soft delete
+    await pool.query(
+      `UPDATE photos SET deleted_at = NOW() WHERE id = $1`,
+      [id]
+    );
+
+    // Optionally delete physical file
     try {
+      const filePath = path.join(process.cwd(), existing.rows[0].file_path);
       await fs.unlink(filePath);
-    } catch (error) {
-      // Fichier peut ne pas exister
+    } catch (e) {
+      // File may not exist, ignore
     }
 
-    photo.deletedAt = new Date();
-    photo.updatedAt = new Date();
-    await db.insert(photo);
+    logger.info(`Photo deleted: ${id}`);
 
     res.json({
       success: true,
       message: 'Photo deleted successfully',
     });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('Photo not found', 404));
-    } else {
-      next(error);
-    }
+  } catch (error) {
+    next(error);
   }
 };

@@ -2,9 +2,13 @@
  * Company Service
  * Gère la sauvegarde et la récupération automatique des informations des entreprises
  * Les entreprises sont partagées entre TOUS les utilisateurs
+ * 
+ * EN MODE WEB: Utilise l'API pour récupérer les entreprises depuis les projets du serveur
+ * EN MODE OFFLINE: Utilise IndexedDB (fallback)
  */
 
 import { db, Company } from '../db/database';
+import { apiService } from './apiService';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface CompanyData {
@@ -18,66 +22,166 @@ export interface CompanyData {
   email?: string;
 }
 
+// Cache pour les entreprises du serveur
+let serverCompaniesCache: Company[] = [];
+let lastFetchTime = 0;
+const CACHE_DURATION = 30000; // 30 secondes
+
+/**
+ * Récupérer les entreprises depuis le serveur
+ */
+const fetchServerCompanies = async (): Promise<Company[]> => {
+  const now = Date.now();
+  
+  // Utiliser le cache si valide
+  if (serverCompaniesCache.length > 0 && (now - lastFetchTime) < CACHE_DURATION) {
+    return serverCompaniesCache;
+  }
+  
+  try {
+    const companies = await apiService.getCompanies();
+    serverCompaniesCache = companies.map((c, index) => ({
+      id: `server-company-${index}`,
+      userId: 'server',
+      nom: c.nom,
+      rc: c.rc || '',
+      cnss: c.cnss || '',
+      usageCount: 1,
+      lastUsed: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+    lastFetchTime = now;
+    console.log(`✅ ${serverCompaniesCache.length} entreprises récupérées du serveur`);
+    return serverCompaniesCache;
+  } catch (error) {
+    console.warn('⚠️ Impossible de récupérer les entreprises du serveur, fallback IndexedDB');
+    return [];
+  }
+};
+
 /**
  * Rechercher des entreprises par nom (pour l'autocomplétion)
  * Les entreprises sont partagées entre TOUS les utilisateurs
+ * Mode Web: Récupère depuis l'API (projets du serveur)
  */
 export const searchCompanies = async (
   _userId: string, // Gardé pour compatibilité mais non utilisé
   searchTerm: string
 ): Promise<Company[]> => {
+  // D'abord, essayer de récupérer depuis le serveur
+  const serverCompanies = await fetchServerCompanies();
+  
+  // Aussi récupérer les entreprises locales (IndexedDB)
+  let localCompanies: Company[] = [];
+  try {
+    localCompanies = await db.companies.toArray();
+  } catch (e) {
+    // IndexedDB non disponible
+  }
+  
+  // Fusionner les deux sources (serveur prioritaire)
+  const allCompaniesMap = new Map<string, Company>();
+  
+  // D'abord les entreprises du serveur
+  for (const c of serverCompanies) {
+    allCompaniesMap.set(c.nom.toLowerCase(), c);
+  }
+  
+  // Ensuite les entreprises locales (ne remplace pas les existantes)
+  for (const c of localCompanies) {
+    const key = c.nom.toLowerCase();
+    if (!allCompaniesMap.has(key)) {
+      allCompaniesMap.set(key, c);
+    }
+  }
+  
+  const allCompanies = Array.from(allCompaniesMap.values());
+  
   if (!searchTerm || searchTerm.length < 2) {
-    // Retourner les entreprises les plus utilisées (toutes les entreprises)
-    const allCompanies = await db.companies.toArray();
+    // Retourner les entreprises les plus utilisées
     return allCompanies
-      .sort((a, b) => b.usageCount - a.usageCount)
+      .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0))
       .slice(0, 10);
   }
 
   const term = searchTerm.toLowerCase();
   
-  // Rechercher par nom dans TOUTES les entreprises
-  const companies = await db.companies
-    .filter(company => {
-      const matchNom = company.nom.toLowerCase().includes(term);
-      const matchRc = company.rc ? company.rc.toLowerCase().includes(term) : false;
-      const matchCnss = company.cnss ? company.cnss.toLowerCase().includes(term) : false;
-      return matchNom || matchRc || matchCnss;
-    })
-    .toArray();
+  // Filtrer par nom, RC ou CNSS
+  const filtered = allCompanies.filter(company => {
+    const matchNom = company.nom.toLowerCase().includes(term);
+    const matchRc = company.rc ? company.rc.toLowerCase().includes(term) : false;
+    const matchCnss = company.cnss ? company.cnss.toLowerCase().includes(term) : false;
+    return matchNom || matchRc || matchCnss;
+  });
 
   // Trier par pertinence (commence par > contient) et par usage
-  return companies.sort((a, b) => {
+  return filtered.sort((a, b) => {
     const aStartsWith = a.nom.toLowerCase().startsWith(term);
     const bStartsWith = b.nom.toLowerCase().startsWith(term);
     
     if (aStartsWith && !bStartsWith) return -1;
     if (!aStartsWith && bStartsWith) return 1;
     
-    return b.usageCount - a.usageCount;
+    return (b.usageCount || 0) - (a.usageCount || 0);
   }).slice(0, 10);
 };
 
 /**
  * Obtenir toutes les entreprises (partagées entre tous les utilisateurs)
+ * Mode Web: Récupère depuis l'API
  */
 export const getAllCompanies = async (_userId: string): Promise<Company[]> => {
-  const allCompanies = await db.companies.toArray();
-  return allCompanies.sort((a, b) => b.usageCount - a.usageCount);
+  // D'abord, essayer de récupérer depuis le serveur
+  const serverCompanies = await fetchServerCompanies();
+  
+  // Aussi récupérer les entreprises locales (IndexedDB)
+  let localCompanies: Company[] = [];
+  try {
+    localCompanies = await db.companies.toArray();
+  } catch (e) {
+    // IndexedDB non disponible
+  }
+  
+  // Fusionner (serveur prioritaire)
+  const allCompaniesMap = new Map<string, Company>();
+  for (const c of serverCompanies) {
+    allCompaniesMap.set(c.nom.toLowerCase(), c);
+  }
+  for (const c of localCompanies) {
+    const key = c.nom.toLowerCase();
+    if (!allCompaniesMap.has(key)) {
+      allCompaniesMap.set(key, c);
+    }
+  }
+  
+  return Array.from(allCompaniesMap.values()).sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
 };
 
 /**
  * Obtenir une entreprise par son nom exact (recherche globale)
+ * Mode Web: Cherche d'abord dans le serveur, puis localement
  */
 export const getCompanyByName = async (
   _userId: string, // Gardé pour compatibilité mais non utilisé
   nom: string
 ): Promise<Company | undefined> => {
-  const companies = await db.companies
-    .filter(c => c.nom.toLowerCase() === nom.toLowerCase())
-    .toArray();
+  const searchTerm = nom.toLowerCase();
   
-  return companies[0];
+  // Chercher dans le cache serveur
+  const serverCompanies = await fetchServerCompanies();
+  const serverMatch = serverCompanies.find(c => c.nom.toLowerCase() === searchTerm);
+  if (serverMatch) return serverMatch;
+  
+  // Fallback: chercher dans IndexedDB
+  try {
+    const companies = await db.companies
+      .filter(c => c.nom.toLowerCase() === searchTerm)
+      .toArray();
+    return companies[0];
+  } catch (e) {
+    return undefined;
+  }
 };
 
 /**

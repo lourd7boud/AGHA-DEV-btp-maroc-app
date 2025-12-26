@@ -7,7 +7,7 @@
 
 import { db, SyncOperation } from '../db/database';
 import { apiService } from './apiService';
-import { getDeviceId, setLastSyncTimestamp } from './syncServiceV2';
+import { getDeviceId, setLastSyncTimestamp } from './syncServiceCore';
 import { realtimeSync } from './realtimeSync';
 
 // ==================== TYPES ====================

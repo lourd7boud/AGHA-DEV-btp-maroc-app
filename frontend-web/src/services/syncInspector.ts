@@ -17,7 +17,7 @@
 
 import { db } from '../db/database';
 import { apiService } from '../services/apiService';
-import { pullLatestData, getSyncLogs } from '../hooks/useSyncManagerV3';
+import { pullLatestData, getSyncLogs } from '../hooks/useSyncManagerCore';
 
 // ==================== TYPES ====================
 

@@ -6,7 +6,7 @@ import {
   getPVById,
   updatePV,
   deletePV,
-} from '../controllers/pv.controller.pg';
+} from '../controllers/pv.controller';
 
 const router = Router();
 router.use(authenticate);

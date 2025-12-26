@@ -124,7 +124,15 @@ export const createPeriode = async (
   try {
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
-    const { projectId, numero, libelle, dateDebut, dateFin, statut, isDecompteDernier } = req.body;
+    // Accept projectId from params (URL) or body
+    const projectIdFromParams = req.params.projectId;
+    const { projectId: projectIdFromBody, numero, libelle, dateDebut, dateFin, statut, isDecompteDernier } = req.body;
+    const projectId = projectIdFromParams || projectIdFromBody;
+    
+    if (!projectId) {
+      throw new ApiError('Project ID is required', 400);
+    }
+    
     const pool = getPool();
 
     // Verify project ownership

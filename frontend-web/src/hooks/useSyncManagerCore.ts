@@ -23,6 +23,7 @@ import {
 } from '../services/syncService';
 import { realtimeSync, RealtimeOperation } from '../services/realtimeSync';
 import { realtimeEvents, REALTIME_EVENTS } from './useRealtimeSync';
+import { useDirtyStateStore } from '../store/dirtyStateStore';
 
 // ==================== TYPES ====================
 
@@ -228,6 +229,7 @@ const applyRemoteOperations = async (operations: RemoteOperation[]): Promise<{
 
   for (const op of sortedOps) {
     const entityId = normalizeEntityId(op.entity, op.entityId);
+    const rawEntityId = cleanEntityId(op.entityId); // ID without prefix
 
     // CRITICAL: Block DELETE operations from sync pull
     // DELETE should only be applied via direct user action, not sync
@@ -240,9 +242,10 @@ const applyRemoteOperations = async (operations: RemoteOperation[]): Promise<{
     }
 
     // Check for pending local sync op
+    // 🔴 FIX: Search both with and without prefix since logSyncOperation stores without prefix
     const pendingConflict = await db.syncOperations
       .where('entityId')
-      .equals(entityId)
+      .anyOf([entityId, rawEntityId])
       .filter(p => p.entity === op.entity && !p.synced)
       .count();
 
@@ -317,24 +320,68 @@ const applyRemoteOperations = async (operations: RemoteOperation[]): Promise<{
         const table = (db as any)[tableName];
         if (!table) continue;
 
-        // Bulk create/update using bulkPut
+        // 🔴 FIX: For CREATE operations, merge with existing local data to prevent data loss
+        // This handles the case where server sends old CREATE that would overwrite local changes
         if (ops.creates.length > 0) {
           try {
-            await table.bulkPut(ops.creates);
-            result.applied += ops.creates.length;
-            addSyncLog({ action: 'BULK_CREATE', entity: tableName, success: true, data: { count: ops.creates.length } });
-          } catch (error: any) {
-            // Fallback to individual puts
+            // Process each create individually to merge with existing data
             for (const item of ops.creates) {
               try {
-                await table.put(item);
+                const existingLocal = await table.get(item.id);
+                
+                if (existingLocal) {
+                  // 🔴 CRITICAL: Local data exists - merge carefully
+                  // For metres, preserve local sections/subSections/lignes if they exist
+                  if (tableName === 'metres') {
+                    const mergedData = {
+                      ...item,
+                      // Preserve local hierarchical data if it exists and server data is empty
+                      sections: (item.sections && item.sections.length > 0) ? item.sections : (existingLocal.sections || []),
+                      subSections: (item.subSections && item.subSections.length > 0) ? item.subSections : (existingLocal.subSections || []),
+                      lignes: (item.lignes && item.lignes.length > 0) ? item.lignes : (existingLocal.lignes || []),
+                      // Use the most recent totals
+                      totalPartiel: item.totalPartiel || existingLocal.totalPartiel || 0,
+                      totalCumule: item.totalCumule || existingLocal.totalCumule || 0,
+                    };
+                    await table.put(mergedData);
+                    console.log(`📦 Merged metre data for ${item.id} - preserved local sections/lignes`);
+                  } 
+                  // 🔴 FIX: For bordereaux, preserve local lignes with their quantite values
+                  else if (tableName === 'bordereaux') {
+                    // Check if local lignes have more data (non-zero quantite)
+                    const localHasQuantite = existingLocal.lignes?.some((l: any) => l.quantite > 0);
+                    const serverHasQuantite = item.lignes?.some((l: any) => l.quantite > 0);
+                    
+                    const mergedData = {
+                      ...item,
+                      // Preserve local lignes if they have quantite values and server doesn't
+                      lignes: (serverHasQuantite || !localHasQuantite) ? item.lignes : existingLocal.lignes,
+                      montantTotal: (serverHasQuantite || !localHasQuantite) ? item.montantTotal : existingLocal.montantTotal,
+                    };
+                    await table.put(mergedData);
+                    console.log(`📦 Merged bordereau data for ${item.id} - preserved local lignes with quantite`);
+                  }
+                  else {
+                    // For other entities, prefer server data but preserve local timestamps
+                    await table.put({
+                      ...item,
+                      updatedAt: item.updatedAt || existingLocal.updatedAt,
+                    });
+                  }
+                } else {
+                  // No local data, just add the new item
+                  await table.put(item);
+                }
                 result.applied++;
-                addSyncLog({ action: 'CREATE', entity: tableName, entityId: item.id, success: true });
               } catch (putError: any) {
                 result.errors.push({ op: { type: 'CREATE', entity: tableName, entityId: item.id, data: item } as any, error: putError.message });
                 addSyncLog({ action: 'CREATE', entity: tableName, entityId: item.id, success: false, error: putError.message });
               }
             }
+            addSyncLog({ action: 'BULK_CREATE', entity: tableName, success: true, data: { count: ops.creates.length } });
+          } catch (error: any) {
+            console.error(`❌ Error in bulk create for ${tableName}:`, error);
+            result.errors.push({ op: { type: 'CREATE', entity: tableName } as any, error: error.message });
           }
         }
 
@@ -344,7 +391,34 @@ const applyRemoteOperations = async (operations: RemoteOperation[]): Promise<{
             // First check if entity exists
             const existing = await table.get(upd.id);
             if (existing) {
-              await table.update(upd.id, upd.data);
+              // 🔴 FIX: For metres, merge hierarchical data to prevent data loss
+              if (tableName === 'metres') {
+                const mergedData = {
+                  ...upd.data,
+                  // Preserve local hierarchical data if server data is empty/undefined
+                  sections: (upd.data.sections && upd.data.sections.length > 0) ? upd.data.sections : existing.sections,
+                  subSections: (upd.data.subSections && upd.data.subSections.length > 0) ? upd.data.subSections : existing.subSections,
+                  lignes: (upd.data.lignes && upd.data.lignes.length > 0) ? upd.data.lignes : existing.lignes,
+                };
+                await table.update(upd.id, mergedData);
+                console.log(`📦 Merged metre update for ${upd.id} - preserved local hierarchical data`);
+              } 
+              // 🔴 FIX: For bordereaux, preserve local lignes with quantite values
+              else if (tableName === 'bordereaux') {
+                const localHasQuantite = existing.lignes?.some((l: any) => l.quantite > 0);
+                const serverHasQuantite = upd.data.lignes?.some((l: any) => l.quantite > 0);
+                
+                const mergedData = {
+                  ...upd.data,
+                  lignes: (serverHasQuantite || !localHasQuantite) ? upd.data.lignes : existing.lignes,
+                  montantTotal: (serverHasQuantite || !localHasQuantite) ? upd.data.montantTotal : existing.montantTotal,
+                };
+                await table.update(upd.id, mergedData);
+                console.log(`📦 Merged bordereau update for ${upd.id} - preserved local lignes`);
+              }
+              else {
+                await table.update(upd.id, upd.data);
+              }
             } else {
               // If not exists, create it (server says update, but we don't have it)
               await table.put({ ...upd.data, id: upd.id });
@@ -403,11 +477,35 @@ const applyRemoteOperations = async (operations: RemoteOperation[]): Promise<{
 
         switch (op.type) {
           case 'CREATE':
-            await table.put({ ...normalizedData, id: entityId });
+          case 'UPDATE': {
+            // 🔴 FIX: Apply same merge logic as in transaction for metres and bordereaux
+            const existingLocal = await table.get(entityId);
+            if (tableName === 'metres' && existingLocal) {
+              const mergedData = {
+                ...normalizedData,
+                id: entityId,
+                sections: (normalizedData.sections && normalizedData.sections.length > 0) ? normalizedData.sections : (existingLocal.sections || []),
+                subSections: (normalizedData.subSections && normalizedData.subSections.length > 0) ? normalizedData.subSections : (existingLocal.subSections || []),
+                lignes: (normalizedData.lignes && normalizedData.lignes.length > 0) ? normalizedData.lignes : (existingLocal.lignes || []),
+              };
+              await table.put(mergedData);
+              console.log(`📦 Fallback: Merged metre data for ${entityId}`);
+            } else if (tableName === 'bordereaux' && existingLocal) {
+              const localHasQuantite = existingLocal.lignes?.some((l: any) => l.quantite > 0);
+              const serverHasQuantite = normalizedData.lignes?.some((l: any) => l.quantite > 0);
+              const mergedData = {
+                ...normalizedData,
+                id: entityId,
+                lignes: (serverHasQuantite || !localHasQuantite) ? normalizedData.lignes : existingLocal.lignes,
+                montantTotal: (serverHasQuantite || !localHasQuantite) ? normalizedData.montantTotal : existingLocal.montantTotal,
+              };
+              await table.put(mergedData);
+              console.log(`📦 Fallback: Merged bordereau data for ${entityId}`);
+            } else {
+              await table.put({ ...normalizedData, id: entityId });
+            }
             break;
-          case 'UPDATE':
-            await table.put({ ...normalizedData, id: entityId });
-            break;
+          }
           case 'DELETE':
             await table.delete(entityId);
             break;
@@ -429,8 +527,22 @@ const applyRemoteOperations = async (operations: RemoteOperation[]): Promise<{
 
 /**
  * Fetch all data directly from API (for initial sync or recovery)
+ * Will skip if there are unsaved changes (dirty pages)
  */
-export const pullLatestData = async (projectId?: string): Promise<number> => {
+export const pullLatestData = async (projectId?: string, forcePull: boolean = false): Promise<number> => {
+  // 🔴 التحقق من وجود تغييرات غير محفوظة
+  const dirtyState = useDirtyStateStore.getState();
+  if (dirtyState.hasAnyDirtyPages() && !forcePull) {
+    const dirtyPages = dirtyState.getDirtyPages();
+    console.log('⚠️ PULL SKIPPED: Unsaved changes detected in:', dirtyPages.map(p => p.pageName).join(', '));
+    addSyncLog({ 
+      action: 'PULL_SKIPPED', 
+      success: true, 
+      data: { reason: 'unsaved_changes', dirtyPages: dirtyPages.map(p => p.pageName) } 
+    });
+    return 0;
+  }
+
   let totalPulled = 0;
 
   console.log('📥 Starting direct data pull...', projectId ? `for project: ${projectId}` : 'all data');
@@ -561,7 +673,7 @@ export const pullLatestData = async (projectId?: string): Promise<number> => {
 
 // ==================== MAIN HOOK ====================
 
-export const useSyncManagerV3 = (userId: string | null) => {
+export const useSyncManager = (userId: string | null) => {
   // ==================== PENDING COUNT (REACTIVE) ====================
   const pendingCount = useLiveQuery(async () => {
     if (!userId) return 0;
@@ -739,13 +851,17 @@ export const useSyncManagerV3 = (userId: string | null) => {
         
         // CRITICAL: Mark operations with permanent errors as "failed" to stop retrying
         // Errors like "numeric field overflow" will never succeed, so stop trying
-        const fatalErrorPatterns = ['overflow', 'invalid', 'constraint', 'duplicate key'];
+        // But DO NOT delete foreign key errors - they may succeed when parent is created
+        const fatalErrorPatterns = ['overflow', 'invalid input', 'duplicate key', 'not-null'];
+        // Exclude foreign key errors - they are recoverable if parent gets created
+        const recoverablePatterns = ['foreign key', 'fkey'];
         
         for (const errItem of errors) {
           const errorMsg = (errItem.error || '').toLowerCase();
+          const isRecoverable = recoverablePatterns.some(pattern => errorMsg.includes(pattern));
           const isFatalError = fatalErrorPatterns.some(pattern => errorMsg.includes(pattern));
           
-          if (isFatalError) {
+          if (isFatalError && !isRecoverable) {
             // Find the matching pending op and mark it as failed (synced=true with error flag)
             const failedOp = pendingOps.find(op => 
               op.id === errItem.id || 
@@ -765,6 +881,8 @@ export const useSyncManagerV3 = (userId: string | null) => {
                 error: errItem.error 
               });
             }
+          } else if (isRecoverable) {
+            console.log(`⏳ Recoverable error, keeping op for retry: ${errItem.error?.slice(0, 50)}...`);
           }
         }
       }
@@ -818,6 +936,9 @@ export const useSyncManagerV3 = (userId: string | null) => {
 
       // Update last sync timestamp
       setLastSyncTimestamp(serverTime);
+      
+      // 🔴 Mark full sync complete to prevent realtime sync:state from re-applying
+      realtimeSync.markFullSyncComplete();
 
       addSyncLog({ action: 'PULL_COMPLETE', success: true });
 
@@ -1018,6 +1139,109 @@ export const useSyncManagerV3 = (userId: string | null) => {
   }, []);
 
   /**
+   * Repair orphaned entities - create sync operations for entities that exist locally but weren't synced
+   */
+  const repairOrphanedEntities = useCallback(async () => {
+    if (!userId) return { repaired: 0, errors: [] as string[] };
+    
+    console.log('🔧 Starting orphaned entity repair...');
+    const deviceId = getDeviceId();
+    const now = Date.now();
+    let repaired = 0;
+    const errors: string[] = [];
+    
+    try {
+      // Get all local projects
+      const localProjects = await db.projects.where('userId').equals(userId).toArray();
+      
+      for (const project of localProjects) {
+        // Check if there's a pending CREATE sync operation for this project
+        const existingOp = await db.syncOperations
+          .where('entityId')
+          .equals(project.id)
+          .filter(op => op.type === 'CREATE' && !op.synced)
+          .first();
+        
+        if (!existingOp) {
+          // No CREATE op exists - create one
+          console.log(`🔧 Creating missing sync op for project: ${project.id}`);
+          
+          const syncOp = {
+            id: `repair:${project.id}:${now}`,
+            userId,
+            deviceId,
+            type: 'CREATE' as const,
+            entity: 'project' as const,
+            entityId: project.id,
+            data: project,
+            timestamp: now - 1000, // Slightly in the past to ensure it's processed first
+            synced: false,
+          };
+          
+          await db.syncOperations.add(syncOp);
+          repaired++;
+          console.log(`✅ Created repair sync op for project: ${project.marcheNo}`);
+        }
+      }
+      
+      // Also check bordereaux, periodes, metres, decompts
+      type EntityConfig = {
+        table: typeof db.bordereaux | typeof db.periodes | typeof db.metres | typeof db.decompts;
+        entity: 'bordereau' | 'periode' | 'metre' | 'decompt';
+      };
+      
+      const entityConfigs: EntityConfig[] = [
+        { table: db.bordereaux, entity: 'bordereau' },
+        { table: db.periodes, entity: 'periode' },
+        { table: db.metres, entity: 'metre' },
+        { table: db.decompts, entity: 'decompt' },
+      ];
+      
+      for (const config of entityConfigs) {
+        const localEntities = await config.table.where('userId').equals(userId).toArray();
+        
+        for (const entity of localEntities) {
+          const existingOp = await db.syncOperations
+            .where('entityId')
+            .equals(entity.id)
+            .filter(op => op.type === 'CREATE' && !op.synced)
+            .first();
+          
+          if (!existingOp) {
+            const syncOp = {
+              id: `repair:${entity.id}:${now}`,
+              userId,
+              deviceId,
+              type: 'CREATE' as const,
+              entity: config.entity,
+              entityId: entity.id,
+              data: entity,
+              timestamp: now,
+              synced: false,
+            };
+            
+            await db.syncOperations.add(syncOp);
+            repaired++;
+          }
+        }
+      }
+      
+      console.log(`✅ Repaired ${repaired} orphaned entities`);
+      
+      // Trigger sync to push the repaired operations
+      if (repaired > 0) {
+        await updatePendingCount();
+      }
+      
+      return { repaired, errors };
+    } catch (error: any) {
+      console.error('❌ Repair failed:', error);
+      errors.push(error.message);
+      return { repaired, errors };
+    }
+  }, [userId, updatePendingCount]);
+
+  /**
    * Full reset: Clear all local data and re-sync from server
    */
   const resetAndResync = useCallback(async () => {
@@ -1041,12 +1265,42 @@ export const useSyncManagerV3 = (userId: string | null) => {
     }
   }, [userId, clearPendingOperations, pullLatestData]);
 
+  // ==================== REFRESH FROM SERVER ====================
+  /**
+   * Force refresh data from server - THE SERVER IS THE SOURCE OF TRUTH
+   * This should be called when opening any page to ensure data consistency
+   */
+  const refreshFromServer = useCallback(async (projectId?: string): Promise<void> => {
+    if (!userId || !isOnline()) {
+      console.log('🚫 Cannot refresh: user not authenticated or offline');
+      return;
+    }
+
+    console.log('🔄 [SERVER_REFRESH] Forcing data refresh from server...');
+    setSyncState(prev => ({ ...prev, status: 'pulling' }));
+
+    try {
+      // 1. First push any pending local changes
+      await syncPush();
+      
+      // 2. Then pull latest data from server (force pull ignores dirty state)
+      const pulled = await pullLatestData(projectId, true);
+      
+      console.log(`✅ [SERVER_REFRESH] Refreshed ${pulled} items from server`);
+      setSyncState(prev => ({ ...prev, status: 'synced', lastPullCount: pulled }));
+    } catch (error: any) {
+      console.error('❌ [SERVER_REFRESH] Failed:', error);
+      setSyncState(prev => ({ ...prev, status: 'error', error: error.message }));
+    }
+  }, [userId, syncPush]);
+
   return {
     syncState,
     sync,
     syncPush,
     syncPull,
     pullLatestData,
+    refreshFromServer,
     updatePendingCount,
     autoSyncEnabled,
     setAutoSyncEnabled,
@@ -1060,6 +1314,7 @@ export const useSyncManagerV3 = (userId: string | null) => {
     // Recovery tools
     clearPendingOperations,
     resetAndResync,
+    repairOrphanedEntities,
     // Debug tools
     getSyncLogs,
     clearSyncLogs,
@@ -1071,6 +1326,3 @@ export const useSyncManagerV3 = (userId: string | null) => {
     }),
   };
 };
-
-// Export default
-export { useSyncManagerV3 as useSyncManager };

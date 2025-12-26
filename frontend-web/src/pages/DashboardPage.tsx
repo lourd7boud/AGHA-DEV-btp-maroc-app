@@ -1,9 +1,10 @@
-import { FC, useMemo } from 'react';
+import { FC, useMemo, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/database';
 import { useAuthStore } from '../store/authStore';
+import { useProjects } from '../hooks/useUnifiedData';
+import { apiService } from '../services/apiService';
+import { isWeb } from '../utils/platform';
 import {
   FolderKanban,
   CheckCircle2,
@@ -17,10 +18,15 @@ import {
   AlertCircle,
   Timer,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Target,
   Zap,
   Shield,
   Receipt,
+  Loader2,
+  WifiOff,
+  RefreshCw,
 } from 'lucide-react';
 import { differenceInDays, addMonths } from 'date-fns';
 
@@ -56,21 +62,63 @@ const DashboardPage: FC = () => {
   const { user } = useAuthStore();
   const navigate = useNavigate();
 
-  // Récupérer toutes les données nécessaires
-  const projects = useLiveQuery(
-    () => db.projects.where('userId').equals(user?.id || '').and((p) => !p.deletedAt).toArray(),
-    [user?.id]
-  );
+  // Server-first data loading
+  const { projects, isLoading, error, refresh } = useProjects(user?.id || null);
+  
+  // Online status for Web
+  const isOnline = navigator.onLine;
+  const canModify = isOnline || !isWeb();
+  const cannotModifyReason = !isOnline && isWeb() ? 'Non disponible hors ligne' : null;
 
-  const decompts = useLiveQuery(
-    () => db.decompts.filter((d) => !d.deletedAt).toArray(),
-    []
-  );
+  // � حالة طي/فتح الإشعارات
+  const [alertsExpanded, setAlertsExpanded] = useState(true);
 
-  const bordereaux = useLiveQuery(
-    () => db.bordereaux.filter((b) => !b.deletedAt).toArray(),
-    []
-  );
+  // �🌐 Web: تحميل bordereaux و decompts من API لكل المشاريع
+  const [bordereaux, setBordereaux] = useState<any[]>([]);
+  const [decompts, setDecompts] = useState<any[]>([]);
+  
+  useEffect(() => {
+    const loadAllData = async () => {
+      if (!projects?.length) {
+        setBordereaux([]);
+        setDecompts([]);
+        return;
+      }
+      
+      const allBordereaux: any[] = [];
+      const allDecompts: any[] = [];
+      
+      try {
+        // تحميل بالتوازي لكل المشاريع
+        await Promise.all(projects.map(async (project) => {
+          const cleanId = project.id?.replace('project:', '') || project.id;
+          
+          try {
+            const bRes = await apiService.getBordereaux(cleanId);
+            const bData = bRes.data || bRes;
+            if (Array.isArray(bData)) {
+              allBordereaux.push(...bData.map(b => ({ ...b, projectId: project.id })));
+            }
+          } catch (e) { /* No bordereau */ }
+          
+          try {
+            const dRes = await apiService.getDecompts(cleanId);
+            const dData = dRes.data || dRes;
+            if (Array.isArray(dData)) {
+              allDecompts.push(...dData.map(d => ({ ...d, projectId: project.id })));
+            }
+          } catch (e) { /* No decompts */ }
+        }));
+        
+        setBordereaux(allBordereaux.filter(b => !b.deletedAt));
+        setDecompts(allDecompts.filter(d => !d.deletedAt));
+      } catch (err) {
+        console.error('Failed to load bordereaux/decompts:', err);
+      }
+    };
+    
+    loadAllData();
+  }, [projects]);
 
   // Calculer les statistiques
   const stats = useMemo<DashboardStats>(() => {
@@ -96,20 +144,30 @@ const DashboardPage: FC = () => {
     let totalRealized = 0;
     
     for (const project of projects) {
+      // تطبيع معرف المشروع للمقارنة
+      const cleanProjectId = project.id?.replace('project:', '') || project.id;
+      
       // Budget: calculer depuis les bordereaux du projet
-      const projectBordereaux = bordereaux?.filter((b) => b.projectId === project.id) || [];
-      const projectBudgetTTC = projectBordereaux.reduce((sum, b) => {
-        const montantHT = b.lignes.reduce((s, l) => {
-          return s + (Number(l.quantite) * Number(l.prixUnitaire || 0));
+      const projectBordereaux = bordereaux?.filter((b: any) => {
+        const bProjectId = (b.projectId || b.project_id)?.replace('project:', '') || b.projectId;
+        return bProjectId === cleanProjectId || b.projectId === project.id;
+      }) || [];
+      const projectBudgetTTC = projectBordereaux.reduce((sum: number, b: any) => {
+        if (!b.lignes) return sum;
+        const montantHT = b.lignes.reduce((s: number, l: any) => {
+          return s + (Number(l.quantite || 0) * Number(l.prixUnitaire || l.prix_unitaire || 0));
         }, 0);
         return sum + (montantHT * 1.2); // TTC = HT × 1.2
       }, 0);
       totalBudget += projectBudgetTTC;
       
       // Réalisé: calculer depuis les décomptes du projet
-      const projectDecompts = decompts?.filter((d) => d.projectId === project.id) || [];
-      const projectRealizedTTC = projectDecompts.reduce((sum, d) => {
-        return sum + (Number(d.totalTTC) || Number(d.montantTotal) || 0);
+      const projectDecompts = decompts?.filter((d: any) => {
+        const dProjectId = (d.projectId || d.project_id)?.replace('project:', '') || d.projectId;
+        return dProjectId === cleanProjectId || d.projectId === project.id;
+      }) || [];
+      const projectRealizedTTC = projectDecompts.reduce((sum: number, d: any) => {
+        return sum + (Number(d.totalTTC || d.total_ttc) || Number(d.montantTotal || d.montant_total) || 0);
       }, 0);
       totalRealized += projectRealizedTTC;
     }
@@ -121,12 +179,16 @@ const DashboardPage: FC = () => {
 
     // Projets qui ont besoin d'un nouveau décompte
     const needDecompte = activeProjects.filter((p) => {
-      const projectDecompts = decompts?.filter((d) => d.projectId === p.id) || [];
+      const cleanPId = p.id?.replace('project:', '') || p.id;
+      const projectDecompts = decompts?.filter((d: any) => {
+        const dPId = (d.projectId || d.project_id)?.replace('project:', '') || d.projectId;
+        return dPId === cleanPId || d.projectId === p.id;
+      }) || [];
       if (projectDecompts.length === 0) return true;
-      const lastDecompte = projectDecompts.sort((a, b) => 
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      const lastDecompte = projectDecompts.sort((a: any, b: any) => 
+        new Date(b.createdAt || b.created_at).getTime() - new Date(a.createdAt || a.created_at).getTime()
       )[0];
-      return differenceInDays(new Date(), new Date(lastDecompte.createdAt)) > 30;
+      return differenceInDays(new Date(), new Date(lastDecompte.createdAt || lastDecompte.created_at)) > 30;
     });
 
     // Deadlines à venir
@@ -250,7 +312,11 @@ const DashboardPage: FC = () => {
 
       // 4. Alerte: Projet sans bordereau
       if (project.status === 'active') {
-        const projectBordereaux = bordereaux?.filter((b) => b.projectId === project.id) || [];
+        const cleanPId = project.id?.replace('project:', '') || project.id;
+        const projectBordereaux = bordereaux?.filter((b: any) => {
+          const bPId = (b.projectId || b.project_id)?.replace('project:', '') || b.projectId;
+          return bPId === cleanPId || b.projectId === project.id;
+        }) || [];
         if (projectBordereaux.length === 0) {
           alertsList.push({
             id: `no-bordereau-${project.id}`,
@@ -276,15 +342,23 @@ const DashboardPage: FC = () => {
     return projects
       .filter((p) => p.status === 'active')
       .map((p) => {
-        const projectDecompts = decompts?.filter((d) => d.projectId === p.id) || [];
-        const lastDecompte = projectDecompts.sort((a, b) => 
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        const cleanPId = p.id?.replace('project:', '') || p.id;
+        const projectDecompts = decompts?.filter((d: any) => {
+          const dPId = (d.projectId || d.project_id)?.replace('project:', '') || d.projectId;
+          return dPId === cleanPId || d.projectId === p.id;
+        }) || [];
+        const lastDecompte = projectDecompts.sort((a: any, b: any) => 
+          new Date(b.createdAt || b.created_at).getTime() - new Date(a.createdAt || a.created_at).getTime()
         )[0];
         
         // Calculer le montant TTC depuis le bordereau
-        const projectBordereaux = bordereaux?.filter((b) => b.projectId === p.id) || [];
-        const montantTTC = projectBordereaux.reduce((sum, b) => {
-          const montantHT = b.lignes.reduce((s, l) => s + (l.quantite * (l.prixUnitaire || 0)), 0);
+        const projectBordereaux = bordereaux?.filter((b: any) => {
+          const bPId = (b.projectId || b.project_id)?.replace('project:', '') || b.projectId;
+          return bPId === cleanPId || b.projectId === p.id;
+        }) || [];
+        const montantTTC = projectBordereaux.reduce((sum: number, b: any) => {
+          if (!b.lignes) return sum;
+          const montantHT = b.lignes.reduce((s: number, l: any) => s + ((l.quantite || 0) * (l.prixUnitaire || l.prix_unitaire || 0)), 0);
           return sum + montantHT * 1.2; // HT * 1.2 = TTC (TVA 20%)
         }, 0);
         
@@ -318,8 +392,8 @@ const DashboardPage: FC = () => {
         return { ...p, lastDecompte, urgency, reason, montantTTC, montantRealise, marcheNum };
       })
       // Trier par N° Marché (numéro) croissant
-      .sort((a, b) => a.marcheNum - b.marcheNum)
-      .slice(0, 10); // Afficher jusqu'à 10 projets
+      .sort((a, b) => a.marcheNum - b.marcheNum);
+      // 🆕 عرض جميع المشاريع بدون حد
   }, [projects, decompts, bordereaux]);
 
   const getAlertStyle = (type: Alert['type']) => {
@@ -342,8 +416,46 @@ const DashboardPage: FC = () => {
     return styles[type];
   };
 
+  // Show loading state on Web when fetching from server
+  if (isLoading && isWeb()) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600 mb-4" />
+        <p className="text-gray-600">Chargement des données depuis le serveur...</p>
+      </div>
+    );
+  }
+
+  // Show error state on Web when offline
+  if (error && isWeb()) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64">
+        <WifiOff className="w-12 h-12 text-red-500 mb-4" />
+        <p className="text-red-600 font-medium mb-2">{error}</p>
+        <button 
+          onClick={() => refresh()}
+          className="btn btn-primary flex items-center gap-2"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Réessayer
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
+      {/* Offline warning banner for Web */}
+      {!isOnline && isWeb() && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-center gap-3">
+          <WifiOff className="w-5 h-5 text-yellow-600" />
+          <div>
+            <p className="font-medium text-yellow-800">Mode hors ligne</p>
+            <p className="text-sm text-yellow-700">Les modifications sont désactivées. Reconnectez-vous pour continuer.</p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -352,51 +464,95 @@ const DashboardPage: FC = () => {
             Bienvenue, {user?.firstName} ! Voici l'état de vos projets.
           </p>
         </div>
-        <Link to="/projects/new" className="btn btn-primary flex items-center gap-2">
-          <Plus className="w-5 h-5" />
-          Nouveau projet
-        </Link>
+        <div className="flex items-center gap-2">
+          {/* Refresh button */}
+          <button 
+            onClick={() => refresh()}
+            disabled={isLoading}
+            className="btn btn-secondary flex items-center gap-2"
+            title="Rafraîchir depuis le serveur"
+          >
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
+          
+          {/* New project button - disabled if offline on Web */}
+          {canModify ? (
+            <Link to="/projects/new" className="btn btn-primary flex items-center gap-2">
+              <Plus className="w-5 h-5" />
+              Nouveau projet
+            </Link>
+          ) : (
+            <button 
+              disabled 
+              className="btn btn-primary flex items-center gap-2 opacity-50 cursor-not-allowed"
+              title={cannotModifyReason || 'Non disponible hors ligne'}
+            >
+              <WifiOff className="w-5 h-5" />
+              Nouveau projet
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Alertes importantes */}
+      {/* Alertes importantes - قابلة للطي */}
       {alerts.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Bell className="w-5 h-5 text-gray-700" />
-            <h2 className="text-lg font-semibold text-gray-900">
-              Alertes ({alerts.length})
-            </h2>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {alerts.slice(0, 4).map((alert) => {
-              const Icon = alert.icon;
-              return (
-                <div
-                  key={alert.id}
-                  className={`p-4 rounded-lg border ${getAlertStyle(alert.type)} flex items-start gap-3`}
-                >
-                  <Icon className={`w-5 h-5 mt-0.5 flex-shrink-0 ${getAlertIconStyle(alert.type)}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium">{alert.title}</p>
-                    <p className="text-sm opacity-80 truncate">{alert.description}</p>
+        <div className="card p-4">
+          <button
+            onClick={() => setAlertsExpanded(!alertsExpanded)}
+            className="w-full flex items-center justify-between"
+          >
+            <div className="flex items-center gap-2">
+              <Bell className="w-5 h-5 text-gray-700" />
+              <h2 className="text-lg font-semibold text-gray-900">
+                Alertes{' '}
+                <span className={`${alerts.length > 0 ? 'text-red-600 bg-red-100 px-2 py-0.5 rounded-full text-sm' : ''}`}>
+                  ({alerts.length})
+                </span>
+              </h2>
+            </div>
+            {alertsExpanded ? (
+              <ChevronUp className="w-5 h-5 text-gray-500" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-gray-500" />
+            )}
+          </button>
+          
+          {alertsExpanded && (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {alerts.slice(0, 4).map((alert) => {
+                const Icon = alert.icon;
+                // 🆕 البحث عن المشروع للحصول على رقمه
+                const project = projects?.find(p => p.id === alert.projectId);
+                const marcheNo = project?.marcheNo || '';
+                return (
+                  <div
+                    key={alert.id}
+                    className={`p-4 rounded-lg border ${getAlertStyle(alert.type)} flex items-start gap-3`}
+                  >
+                    <Icon className={`w-5 h-5 mt-0.5 flex-shrink-0 ${getAlertIconStyle(alert.type)}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium">{alert.title}</p>
+                      {/* 🆕 عرض رقم المشروع بدلاً من الاسم */}
+                      <p className="text-sm opacity-80 truncate font-semibold text-primary-700">{marcheNo}</p>
+                    </div>
+                    {alert.action && (
+                      <Link
+                        to={alert.action.path}
+                        className="flex-shrink-0 text-sm font-medium hover:underline flex items-center gap-1"
+                      >
+                        {alert.action.label}
+                        <ChevronRight className="w-4 h-4" />
+                      </Link>
+                    )}
                   </div>
-                  {alert.action && (
-                    <Link
-                      to={alert.action.path}
-                      className="flex-shrink-0 text-sm font-medium hover:underline flex items-center gap-1"
-                    >
-                      {alert.action.label}
-                      <ChevronRight className="w-4 h-4" />
-                    </Link>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          {alerts.length > 4 && (
-            <p className="text-sm text-gray-500">
-              + {alerts.length - 4} autres alertes
-            </p>
+                );
+              })}
+              {alerts.length > 4 && (
+                <p className="text-sm text-gray-500 col-span-2">
+                  + {alerts.length - 4} autres alertes
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -523,9 +679,9 @@ const DashboardPage: FC = () => {
               </Link>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
               <table className="w-full text-sm">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-blue-50 border-y border-blue-200">
                     <th className="py-2 px-3 text-left font-semibold text-blue-900">N° Marché</th>
                     <th className="py-2 px-3 text-left font-semibold text-blue-900">Objet</th>

@@ -8,7 +8,7 @@ import {
   createUser,
   updateUser,
   deleteUser
-} from '../controllers/auth.controller.pg';
+} from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();

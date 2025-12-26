@@ -1,7 +1,6 @@
-import { FC, useState } from 'react';
+import { FC, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, Periode } from '../db/database';
+import { useProject, useBordereaux, usePeriodes, useMetres } from '../hooks/useUnifiedData';
 import { ArrowLeft, Download, FileText } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -12,51 +11,51 @@ const AttachementPage: FC = () => {
   const [isExporting, setIsExporting] = useState(false);
 
   // Normalize IDs - ensure they have the correct prefix
-  const projectId = rawProjectId?.includes(':') ? rawProjectId : `project:${rawProjectId}`;
+  const rawProjectIdClean = rawProjectId?.replace('project:', '') || '';
   const periodeId = rawPeriodeId 
     ? (rawPeriodeId.includes(':') ? rawPeriodeId : `periode:${rawPeriodeId}`)
     : null;
+  const rawPeriodeIdClean = rawPeriodeId?.replace('periode:', '') || '';
 
-  const project = useLiveQuery(
-    () => db.projects.get(projectId),
-    [projectId]
-  );
+  // Use unified hooks
+  const { project } = useProject(rawProjectIdClean || null);
+  const { bordereau } = useBordereaux(rawProjectIdClean || null);
+  const { periodes } = usePeriodes(rawProjectIdClean || null);
+  // 🔴 FIX: جلب كل الميتريات للمشروع (بدون فلترة بالفترة) ثم نفلتر يدوياً
+  const { metres: allProjectMetres } = useMetres(rawProjectIdClean || null);
 
-  const periode = useLiveQuery<Periode | undefined>(
-    async () => periodeId ? await db.periodes.get(periodeId) : undefined,
-    [periodeId]
-  );
+  // Find the current période from the list
+  const periode = useMemo(() => {
+    if (!periodes || !periodeId) return null;
+    return periodes.find((p: any) => 
+      p.id === periodeId || 
+      p.id === rawPeriodeIdClean ||
+      p.id === `periode:${rawPeriodeIdClean}`
+    ) || null;
+  }, [periodes, periodeId, rawPeriodeIdClean]);
 
-  const bordereau = useLiveQuery(
-    () => db.bordereaux
-      .where('projectId')
-      .equals(projectId)
-      .and((b) => !b.deletedAt)
-      .first(),
-    [projectId]
-  );
+  // Helper to normalize periodeId (remove prefix if present)
+  const normalizePeriodeId = (id: string): string => {
+    if (!id) return '';
+    return id.replace(/^periode:/, '');
+  };
 
-  // Récupérer les métrés - soit par période, soit tous les métrés du projet
-  const metres = useLiveQuery(
-    () => {
-      if (periodeId) {
-        // Mode période: métrés de cette période uniquement
-        return db.metres
-          .where('periodeId')
-          .equals(periodeId)
-          .and((m) => !m.deletedAt)
-          .toArray();
-      } else {
-        // Mode projet: tous les métrés du projet
-        return db.metres
-          .where('projectId')
-          .equals(projectId)
-          .and((m) => !m.deletedAt)
-          .toArray();
-      }
-    },
-    [periodeId, projectId]
-  );
+  // 🔴 FIX: فلترة الميتريات لتشمل كل الفترات من 1 إلى الفترة الحالية
+  const metres = useMemo(() => {
+    if (!allProjectMetres || !periode || !periodes) return [];
+    
+    const currentNumero = periode.numero || 1;
+    
+    // إنشاء قائمة بأرقام الفترات من 1 إلى الفترة الحالية
+    const validPeriodeIds = periodes
+      .filter((p: any) => (p.numero || 1) <= currentNumero)
+      .map((p: any) => normalizePeriodeId(p.id));
+    
+    return allProjectMetres.filter((m: any) => {
+      const metrePeriodeId = normalizePeriodeId(m.periodeId);
+      return validPeriodeIds.includes(metrePeriodeId);
+    });
+  }, [allProjectMetres, periode, periodes]);
 
   // Helper to normalize bordereauLigneId (remove prefix if present)
   const normalizeBordereauLigneId = (id: string): string => {
@@ -74,19 +73,15 @@ const AttachementPage: FC = () => {
       const cleanBordereauId = normalizeBordereauLigneId(bordereau.id);
       const ligneId = `${cleanBordereauId}-ligne-${ligne.numero}`;
       
-      // Find metre matching this line (compare normalized IDs)
-      const metre = metres.find(m => {
+      // 🔴 FIX: جمع كل الميتريات لهذا السطر من كل الفترات (cumul)
+      const metresForLigne = metres.filter((m: any) => {
         const metreLineId = normalizeBordereauLigneId(m.bordereauLigneId);
         return metreLineId === ligneId;
       });
-      
-      // Utiliser totalCumule ou calculer depuis les lignes - ensure it's a number
-      let quantiteCumulee = 0;
-      if (metre?.totalCumule !== undefined && metre?.totalCumule !== null) {
-        quantiteCumulee = Number(metre.totalCumule) || 0;
-      } else if (metre?.lignes && Array.isArray(metre.lignes)) {
-        quantiteCumulee = metre.lignes.reduce((sum, l) => sum + (Number(l.partiel) || 0), 0);
-      }
+
+      // حساب المجموع التراكمي (totalPartiel من كل الفترات)
+      const quantiteCumulee = metresForLigne.reduce((sum: number, m: any) => 
+        sum + (Number(m.totalPartiel) || 0), 0);
       
       return {
         numero: index + 1,
@@ -158,8 +153,8 @@ const AttachementPage: FC = () => {
       yPos += 2;
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
-      const typeMarche = (project as any).typeProjet === 'negocie' ? 'MARCHE NEGOCIE' : 'MARCHE';
-      doc.text(`${typeMarche} N°${project.marcheNo}`, pageWidth / 2, yPos, { align: 'center' });
+      const typeMarcheLabel = project.typeMarche === 'negocie' ? 'MARCHE NEGOCIE' : 'MARCHE';
+      doc.text(`${typeMarcheLabel} N°${project.marcheNo}`, pageWidth / 2, yPos, { align: 'center' });
       
       // Objet du marché (en majuscules, gras)
       yPos += 8;
@@ -279,7 +274,8 @@ const AttachementPage: FC = () => {
     }
   };
 
-  if (!project || !periode || !bordereau) {
+  // Loading state - periode غير مطلوب إذا كان المسار بدون periodeId
+  if (!project || !bordereau || (periodeId && !periode)) {
     return (
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
@@ -295,11 +291,17 @@ const AttachementPage: FC = () => {
       {/* Header */}
       <div className="mb-6">
         <button
-          onClick={() => navigate(`/projects/${projectId}/periodes/${periodeId}/metre`)}
+          onClick={() => {
+            if (periodeId) {
+              navigate(`/projects/${rawProjectIdClean}/metre/${rawPeriodeIdClean}`);
+            } else {
+              navigate(`/projects/${rawProjectIdClean}`);
+            }
+          }}
           className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4"
         >
           <ArrowLeft className="w-5 h-5" />
-          Retour au métré
+          {periodeId ? 'Retour au métré' : 'Retour au projet'}
         </button>
 
         <div className="flex items-start justify-between">
@@ -346,7 +348,7 @@ const AttachementPage: FC = () => {
           <p className="text-sm text-gray-600 mb-4">Direction Provinciale de l'Agriculture de Tata</p>
           
           <p className="font-bold text-sm mb-2">
-            {(project as any).typeProjet === 'negocie' ? 'MARCHE NEGOCIE' : 'MARCHE'} N°{project.marcheNo}
+            {project.typeMarche === 'negocie' ? 'MARCHE NEGOCIE' : 'MARCHE'} N°{project.marcheNo}
           </p>
           
           <p className="text-sm font-semibold text-gray-800 mb-4 px-8">

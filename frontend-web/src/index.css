@@ -49,3 +49,54 @@
     appearance: textfield;
   }
 }
+
+/* Print styles */
+@media print {
+  /* Hide sidebar, navigation, and buttons */
+  aside,
+  nav,
+  .no-print,
+  button,
+  .btn,
+  .btn-primary,
+  .btn-secondary {
+    display: none !important;
+  }
+  
+  /* Full width for main content */
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  
+  /* Reset background colors */
+  body {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  
+  .card {
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+    page-break-inside: avoid;
+  }
+  
+  /* Ensure tables print properly */
+  table {
+    page-break-inside: auto;
+  }
+  
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+  
+  /* Hide "Retour au projet" link */
+  a[href*="retour"],
+  .text-primary-600.hover\\:text-primary-800 {
+    display: none !important;
+  }
+}

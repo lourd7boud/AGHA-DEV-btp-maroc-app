@@ -1,10 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from './store/authStore';
 import { useSyncManager } from './hooks/useSyncManager';
 import { useAutoUpdater } from './hooks/useAutoUpdater';
-import { migrateCompaniesFromProjects } from './services/companyService';
+import { isWeb, isElectron } from './utils/platform';
 
 // Pages
 import LoginPage from './pages/LoginPage';
@@ -16,13 +16,8 @@ import CreateProjectPage from './pages/CreateProjectPage';
 import EditProjectPage from './pages/EditProjectPage';
 import DelaisPage from './pages/DelaisPage';
 import BordereauPage from './pages/BordereauPage';
-// New structured pages - Métré/Décompte with proper numbering
-import MetreListPage from './pages/MetreListPage';
-import MetreEditPage from './pages/MetreEditPage';
-import MetrePageV3 from './pages/MetrePageV3';
-import DecompteListPage from './pages/DecompteListPage';
-// Legacy pages - kept for backward compatibility
-import PeriodeMetrePage from './pages/PeriodeMetrePage';
+// Main pages
+import MetrePage from './pages/MetrePage';
 import PeriodeDecomptePage from './pages/PeriodeDecomptePage';
 import AttachementPage from './pages/AttachementPage';
 import SettingsPage from './pages/SettingsPage';
@@ -36,18 +31,73 @@ import { UpdateNotification } from './components/UpdateNotification';
 function App() {
   useTranslation(); // Initialize i18n
   const { user, isInitialized, checkAuth } = useAuthStore();
-  const { syncState, sync, clearPendingOperations } = useSyncManager(user?.id || null);
+  
+  // 🔴 WEB = SERVER-FIRST: لا نستخدم Sync على المتصفح
+  // 🔵 ELECTRON = OFFLINE-FIRST: Sync فقط على Electron
+  const { syncState, sync, clearPendingOperations } = useSyncManager(
+    isElectron() ? (user?.id || null) : null  // تعطيل Sync على Web
+  );
+  
+  // 🔴 حالة الاتصال للـ Web (بديل بسيط عن syncState)
+  const [webConnectionState, setWebConnectionState] = useState({
+    isOnline: navigator.onLine,
+    lastCheck: Date.now(),
+  });
+  
+  // مراقبة حالة الاتصال على Web
+  useEffect(() => {
+    if (!isWeb()) return;
+    
+    console.log('🌐 [WEB] Server-First mode - No IndexedDB, No Sync Engine');
+    
+    const handleOnline = () => setWebConnectionState({ isOnline: true, lastCheck: Date.now() });
+    const handleOffline = () => setWebConnectionState({ isOnline: false, lastCheck: Date.now() });
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
   
   // Setup auto-updater (only works in Electron)
   useAutoUpdater();
+
+  // 🔴 Web: Simple status function
+  // 🔵 Electron: Full repair and sync functions
+  useEffect(() => {
+    if (isWeb()) {
+      (window as any).btpStatus = () => ({
+        mode: 'WEB SERVER-FIRST',
+        online: webConnectionState.isOnline,
+        message: 'Web mode - all data loaded directly from server, no local storage',
+      });
+      return () => { delete (window as any).btpStatus; };
+    }
+    
+    // 🔵 ELECTRON: Expose sync and repair functions
+    (window as any).btpSync = { 
+      sync, 
+      clearPendingOperations,
+      status: () => ({
+        mode: 'ELECTRON OFFLINE-FIRST',
+        syncState,
+        message: 'Electron mode - IndexedDB + Sync Engine',
+      }),
+    };
+    
+    return () => { delete (window as any).btpSync; };
+  }, [webConnectionState, syncState, sync, clearPendingOperations]);
 
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
 
-  // Déclencher une synchronisation SEULEMENT après que l'auth soit vérifiée
+  // 🔴 WEB = SERVER-FIRST: Pas de sync sur Web
+  // 🔵 ELECTRON = OFFLINE-FIRST: Sync activé
   useEffect(() => {
-    // CRITICAL: Wait for auth to be initialized AND user to exist
     if (!isInitialized) {
       console.log('⏳ Waiting for auth to initialize...');
       return;
@@ -58,31 +108,49 @@ function App() {
       return;
     }
     
-    console.log('✅ Auth initialized, starting sync for user:', user.id);
+    console.log('✅ Auth initialized for user:', user.id);
     
-    // Migrer les entreprises depuis les projets existants
-    migrateCompaniesFromProjects().then(count => {
-      if (count > 0) {
-        console.log(`📦 ${count} entreprises migrées depuis les projets`);
-      }
-    });
+    if (isWeb()) {
+      console.log('🌐 [WEB] Server-First mode - No sync, no IndexedDB');
+      return;
+    }
     
-    // Small delay to ensure everything is ready
+    // 🔵 Electron only: Start sync
+    console.log('🖥️ [ELECTRON] Offline-First mode - Starting sync...');
+    
     const timer = setTimeout(() => {
       sync().catch((error) => {
-        // Ne pas afficher l'erreur si c'est une erreur d'auth
         if (error.response?.status !== 401) {
-          console.error('Sync error on mount:', error);
+          console.error('Sync error:', error);
         }
       });
     }, 300);
     
     return () => clearTimeout(timer);
-  }, [isInitialized, user?.id, sync]); // Depend on isInitialized AND user?.id
+  }, [isInitialized, user?.id, sync]);
+
+  // 🔴 WEB: حالة بسيطة للاتصال بدلاً من sync
+  // 🔵 ELECTRON: حالة sync الكاملة
+  const effectiveSyncState = isWeb() 
+    ? {
+        status: webConnectionState.isOnline ? 'synced' as const : 'offline' as const,
+        lastSyncTime: webConnectionState.lastCheck,
+        pendingOperations: 0,
+        error: webConnectionState.isOnline ? null : 'Mode hors ligne',
+        lastPullCount: 0,
+        realtimeConnected: false,
+      }
+    : syncState;
 
   return (
     <>
-      <SyncIndicator syncState={syncState} onSync={sync} onClearPending={clearPendingOperations} />
+      {/* 🔴 على Web: إظهار مؤشر الاتصال فقط */}
+      {/* 🔵 على Electron: إظهار مؤشر Sync الكامل */}
+      <SyncIndicator 
+        syncState={effectiveSyncState} 
+        onSync={isElectron() ? sync : undefined}  // لا sync على Web
+        onClearPending={isElectron() ? clearPendingOperations : undefined}
+      />
       <UpdateNotification />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
@@ -179,12 +247,13 @@ function App() {
           }
         />
         
+        {/* Métré principal - utilise V3 avec structure hiérarchique */}
         <Route
           path="/projects/:projectId/metre"
           element={
             user ? (
               <Layout>
-                <MetreListPage />
+                <MetrePage />
               </Layout>
             ) : (
               <Navigate to="/login" replace />
@@ -192,12 +261,13 @@ function App() {
           }
         />
         
+        {/* Alias pour /metres - redirige vers V3 */}
         <Route
           path="/projects/:projectId/metres"
           element={
             user ? (
               <Layout>
-                <MetreListPage />
+                <MetrePage />
               </Layout>
             ) : (
               <Navigate to="/login" replace />
@@ -205,13 +275,13 @@ function App() {
           }
         />
         
-        {/* MetrePageV3 - Hierarchical structure like Excel */}
+        {/* Alias metre-v3 - même chose que /metre */}
         <Route
           path="/projects/:projectId/metre-v3"
           element={
             user ? (
               <Layout>
-                <MetrePageV3 />
+                <MetrePage />
               </Layout>
             ) : (
               <Navigate to="/login" replace />
@@ -224,7 +294,7 @@ function App() {
           element={
             user ? (
               <Layout>
-                <MetreEditPage />
+                <MetrePage />
               </Layout>
             ) : (
               <Navigate to="/login" replace />
@@ -232,30 +302,14 @@ function App() {
           }
         />
         
+        {/* Redirect old decomptes routes to project page */}
         <Route
           path="/projects/:projectId/decompte"
-          element={
-            user ? (
-              <Layout>
-                <DecompteListPage />
-              </Layout>
-            ) : (
-              <Navigate to="/login" replace />
-            )
-          }
+          element={<Navigate to=".." replace />}
         />
-        
         <Route
           path="/projects/:projectId/decomptes"
-          element={
-            user ? (
-              <Layout>
-                <DecompteListPage />
-              </Layout>
-            ) : (
-              <Navigate to="/login" replace />
-            )
-          }
+          element={<Navigate to=".." replace />}
         />
         
         <Route
@@ -288,7 +342,7 @@ function App() {
           element={
             user ? (
               <Layout>
-                <PeriodeMetrePage />
+                <MetrePage />
               </Layout>
             ) : (
               <Navigate to="/login" replace />

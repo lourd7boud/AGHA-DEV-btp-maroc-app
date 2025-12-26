@@ -11,6 +11,7 @@
 
 import { io, Socket } from 'socket.io-client';
 import { db } from '../db/database';
+import { useDirtyStateStore } from '../store/dirtyStateStore';
 
 // ==================== TYPES ====================
 
@@ -69,6 +70,10 @@ class RealtimeSyncService {
   private userId: string | null = null;
   private serverUrl: string | null = null;
   private subscribedProjects: Set<string> = new Set();
+  
+  // 🔴 Flag to skip sync:state after initial full sync
+  private lastFullSyncTime: number = 0;
+  private static FULL_SYNC_COOLDOWN = 10000; // 10 seconds cooldown after full sync
 
   constructor() {
     // Load server seq from storage
@@ -197,6 +202,20 @@ class RealtimeSyncService {
 
     this.socket.on('sync:state', (data: { operations: RealtimeOperation[]; serverTime: number }) => {
       console.log('📥 Received sync state:', data.operations.length, 'operations');
+      
+      // 🔴 Skip if we just did a full sync (to avoid duplicate data application)
+      const timeSinceFullSync = Date.now() - this.lastFullSyncTime;
+      if (timeSinceFullSync < RealtimeSyncService.FULL_SYNC_COOLDOWN) {
+        console.log('⏭️ Skipping sync:state - full sync was done', Math.round(timeSinceFullSync / 1000), 'seconds ago');
+        // Still update serverSeq to avoid re-fetching
+        if (data.operations.length > 0) {
+          const maxSeq = Math.max(...data.operations.map(op => op.serverSeq));
+          this.state.serverSeq = Math.max(this.state.serverSeq, maxSeq);
+          localStorage.setItem(REALTIME_CONFIG.SERVER_SEQ_KEY, this.state.serverSeq.toString());
+        }
+        return;
+      }
+      
       for (const op of data.operations) {
         this.handleOperation(op);
       }
@@ -259,6 +278,14 @@ class RealtimeSyncService {
    * Apply operation to local Dexie database
    */
   private async applyOperation(op: RealtimeOperation): Promise<void> {
+    // 🔴 التحقق من وجود تغييرات غير محفوظة - تخطي تحديث metres إذا كانت هناك صفحات dirty
+    const dirtyState = useDirtyStateStore.getState();
+    if (op.entity === 'metre' && dirtyState.hasAnyDirtyPages()) {
+      const dirtyPages = dirtyState.getDirtyPages();
+      console.log('⚠️ Realtime METRE update skipped: Dirty pages exist:', dirtyPages.map(p => p.pageName).join(', '));
+      return;
+    }
+
     const tableMap: Record<string, any> = {
       project: db.projects,
       bordereau: db.bordereaux,
@@ -517,6 +544,15 @@ class RealtimeSyncService {
     localStorage.setItem(REALTIME_CONFIG.SERVER_SEQ_KEY, seq.toString());
   }
 
+  /**
+   * Mark that a full sync was just completed
+   * This prevents sync:state from re-applying operations
+   */
+  markFullSyncComplete(): void {
+    this.lastFullSyncTime = Date.now();
+    console.log('🔄 Full sync marked complete - will skip sync:state for 10 seconds');
+  }
+
   // ==================== CLEANUP ====================
 
   /**
@@ -576,7 +612,7 @@ class RealtimeSyncService {
       if (window.location.protocol === 'app:' || window.location.protocol === 'file:') {
         // HARDCODED PRODUCTION URL FOR ELECTRON
         console.log('🔌 [REALTIME] Electron detected, using production URL');
-        return 'http://162.55.219.151';
+        return 'http://localhost:5000';
       }
 
       // If running on localhost (dev)

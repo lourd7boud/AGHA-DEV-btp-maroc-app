@@ -2,118 +2,147 @@ import { Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs/promises';
-import { getCouchDB } from '../config/database';
+import { getPool } from '../config/postgres';
 import { ApiError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-import { Attachment } from '../models/types';
+import logger from '../utils/logger';
 
+/**
+ * Upload attachment (PostgreSQL version)
+ */
 export const uploadAttachment = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    console.log('=== ATTACHMENT UPLOAD REQUEST ===');
+    logger.info('Uploading attachment...');
+    
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     if (!req.file) {
       throw new ApiError('No file uploaded', 400);
     }
 
-    const { projectId, category, description, linkedType, linkedId } = req.body;
+    const { projectId, category, description, linkedType, linkedId, periodeId, decompteId } = req.body;
 
-    if (!projectId || !category) {
-      throw new ApiError('Project ID and category required', 400);
+    if (!projectId) {
+      throw new ApiError('Project ID required', 400);
     }
 
-    const db = getCouchDB();
-    const project = await db.get(`project:${projectId}`);
+    const pool = getPool();
 
-    if (project.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    // Verify project ownership
+    const project = await pool.query(
+      'SELECT id, folder_path FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL',
+      [projectId, req.user.id]
+    );
+
+    if (project.rows.length === 0) {
+      throw new ApiError('Project not found or not authorized', 404);
     }
 
-    // Déplacer vers le dossier approprié selon la catégorie
+    const folderPath = project.rows[0].folder_path;
+
+    // Determine destination folder based on category
     const categoryFolders: { [key: string]: string } = {
       facture: 'Facture',
       bp: 'BP',
       plan: 'Plans',
       autre: 'Attachement',
     };
-
     const folder = categoryFolders[category] || 'Attachement';
+
+    // Move file to project folder
     const destPath = path.join(
       process.cwd(),
       'uploads',
-      project.folderPath,
+      folderPath,
       folder,
       req.file.filename
     );
 
+    // Ensure directory exists
+    await fs.mkdir(path.dirname(destPath), { recursive: true });
     await fs.rename(req.file.path, destPath);
 
-    const attachment: Attachment = {
-      _id: `attachment:${uuidv4()}`,
-      projectId,
-      userId: req.user.id,
-      fileName: req.file.originalname,
-      filePath: `/uploads/${project.folderPath}/${folder}/${req.file.filename}`,
-      fileSize: req.file.size,
-      mimeType: req.file.mimetype,
-      category,
-      description: description || '',
-      linkedTo:
-        linkedType && linkedId ? { type: linkedType, id: linkedId } : undefined,
-      syncStatus: 'synced',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const attachmentId = uuidv4();
+    const filePathUrl = `/uploads/${folderPath}/${folder}/${req.file.filename}`;
 
-    const result = await db.insert({ ...attachment, type: 'attachment' });
+    const result = await pool.query(
+      `INSERT INTO attachments (
+        id, project_id, periode_id, decompte_id, file_name, file_path, file_type, file_size, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       RETURNING *`,
+      [
+        attachmentId,
+        projectId,
+        periodeId || null,
+        decompteId || null,
+        req.file.originalname,
+        filePathUrl,
+        req.file.mimetype,
+        req.file.size
+      ]
+    );
+
+    logger.info(`Attachment uploaded: ${attachmentId}`);
 
     res.status(201).json({
       success: true,
-      data: { ...attachment, _rev: result.rev },
+      data: result.rows[0],
     });
   } catch (error) {
+    logger.error('Error uploading attachment:', error);
     next(error);
   }
 };
 
+/**
+ * Get all attachments for a project (PostgreSQL version)
+ */
 export const getAttachments = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    console.log('=== ATTACHMENTS GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;
-    const { category } = req.query;
-    const db = getCouchDB();
+    const pool = getPool();
 
-    const selector: any = {
-      type: 'attachment',
-      projectId,
-      userId: req.user.id,
-      deletedAt: { $exists: false },
-    };
+    // Verify project ownership
+    const projectCheck = await pool.query(
+      'SELECT id FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL',
+      [projectId, req.user.id]
+    );
 
-    if (category) {
-      selector.category = category;
+    if (projectCheck.rows.length === 0) {
+      throw new ApiError('Project not found or not authorized', 404);
     }
 
-    const result = await db.find({ selector });
+    const result = await pool.query(
+      `SELECT * FROM attachments WHERE project_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC`,
+      [projectId]
+    );
 
     res.json({
       success: true,
-      data: result.docs,
-      count: result.docs.length,
+      data: result.rows,
+      count: result.rows.length,
     });
   } catch (error) {
+    logger.error('Error fetching attachments:', error);
     next(error);
   }
 };
 
+/**
+ * Get attachment by ID (PostgreSQL version)
+ */
 export const getAttachmentById = async (
   req: AuthRequest,
   res: Response,
@@ -123,23 +152,31 @@ export const getAttachmentById = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const attachment = await db.get(`attachment:${id}`);
+    const pool = getPool();
 
-    if (attachment.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    const result = await pool.query(
+      `SELECT a.* FROM attachments a
+       INNER JOIN projects p ON a.project_id = p.id
+       WHERE a.id = $1 AND p.user_id = $2 AND a.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new ApiError('Attachment not found', 404);
     }
 
-    res.json({ success: true, data: attachment });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('Attachment not found', 404));
-    } else {
-      next(error);
-    }
+    res.json({
+      success: true,
+      data: result.rows[0],
+    });
+  } catch (error) {
+    next(error);
   }
 };
 
+/**
+ * Delete attachment (PostgreSQL version)
+ */
 export const deleteAttachment = async (
   req: AuthRequest,
   res: Response,
@@ -149,34 +186,41 @@ export const deleteAttachment = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const attachment = await db.get(`attachment:${id}`);
+    const pool = getPool();
 
-    if (attachment.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    // Check ownership and get file path
+    const existing = await pool.query(
+      `SELECT a.* FROM attachments a
+       INNER JOIN projects p ON a.project_id = p.id
+       WHERE a.id = $1 AND p.user_id = $2 AND a.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (existing.rows.length === 0) {
+      throw new ApiError('Attachment not found', 404);
     }
 
-    // Supprimer le fichier physique
-    const filePath = path.join(process.cwd(), attachment.filePath);
+    // Soft delete
+    await pool.query(
+      `UPDATE attachments SET deleted_at = NOW() WHERE id = $1`,
+      [id]
+    );
+
+    // Optionally delete physical file
     try {
+      const filePath = path.join(process.cwd(), existing.rows[0].file_path);
       await fs.unlink(filePath);
-    } catch (error) {
-      // Fichier peut ne pas exister
+    } catch (e) {
+      // File may not exist, ignore
     }
 
-    attachment.deletedAt = new Date();
-    attachment.updatedAt = new Date();
-    await db.insert(attachment);
+    logger.info(`Attachment deleted: ${id}`);
 
     res.json({
       success: true,
       message: 'Attachment deleted successfully',
     });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('Attachment not found', 404));
-    } else {
-      next(error);
-    }
+  } catch (error) {
+    next(error);
   }
 };

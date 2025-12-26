@@ -248,6 +248,8 @@ export const initPostgres = async (): Promise<void> => {
         ALTER TABLE projects ADD COLUMN IF NOT EXISTS rcn VARCHAR(100);
         ALTER TABLE projects ADD COLUMN IF NOT EXISTS delais_entree_service DATE;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS last_sync TIMESTAMP;
+        -- Add deleted_at to companies for soft delete support
+        ALTER TABLE companies ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
       EXCEPTION WHEN OTHERS THEN NULL;
       END $$;
     `);

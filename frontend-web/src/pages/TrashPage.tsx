@@ -1,38 +1,80 @@
-import { FC, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { FC, useState, useMemo, useEffect } from 'react';
 import { db } from '../db/database';
 import { useAuthStore } from '../store/authStore';
 import { logSyncOperation } from '../services/syncService';
 import { apiService } from '../services/apiService';
 import { Trash2, RotateCcw, AlertCircle, Calendar } from 'lucide-react';
 import { format } from 'date-fns';
+import { isWeb } from '../utils/platform';
 
 const TrashPage: FC = () => {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState<string | null>(null);
+  const [deletedProjects, setDeletedProjects] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Get deleted projects from IndexedDB
-  const deletedProjects = useLiveQuery(
-    () => db.projects.where('userId').equals(user?.id || '').and((p) => !!p.deletedAt).toArray(),
-    [user?.id]
-  );
+  // Normaliser l'ID utilisateur pour la recherche
+  const userIdVariants = useMemo(() => {
+    if (!user?.id) return [];
+    const cleanId = user.id.includes(':') ? user.id.split(':').pop()! : user.id;
+    return [cleanId, `user:${cleanId}`];
+  }, [user?.id]);
+
+  // Charger les projets supprimés
+  useEffect(() => {
+    const loadDeletedProjects = async () => {
+      if (!user?.id) {
+        setDeletedProjects([]);
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        if (isWeb()) {
+          // 🌐 Web: charger depuis le serveur
+          const response = await apiService.getDeletedProjects();
+          setDeletedProjects(response.data || response || []);
+        } else {
+          // 🖥️ Electron: charger depuis IndexedDB
+          const allProjects = await db.projects.filter(p => !!p.deletedAt).toArray();
+          const filtered = allProjects.filter(p => userIdVariants.includes(p.userId));
+          setDeletedProjects(filtered);
+        }
+      } catch (error) {
+        console.error('Error loading deleted projects:', error);
+        setDeletedProjects([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadDeletedProjects();
+  }, [user?.id, userIdVariants]);
 
   const handleRestore = async (projectId: string) => {
     if (!user) return;
 
     setLoading(projectId);
     try {
-      // Restore on server
-      await apiService.restoreProject(projectId);
-
-      // Update locally
-      await db.projects.update(projectId, {
-        deletedAt: undefined,
-        updatedAt: new Date().toISOString(),
-      });
-
-      // Log sync operation
-      await logSyncOperation('UPDATE', 'project', projectId, { deletedAt: null }, user.id);
+      if (isWeb()) {
+        // 🌐 Web: API directe
+        await apiService.restoreProject(projectId.replace('project:', ''));
+        // Recharger la liste
+        const response = await apiService.getDeletedProjects();
+        setDeletedProjects(response.data || response || []);
+      } else {
+        // 🖥️ Electron: IndexedDB + sync
+        await apiService.restoreProject(projectId);
+        await db.projects.update(projectId, {
+          deletedAt: undefined,
+          updatedAt: new Date().toISOString(),
+        });
+        await logSyncOperation('UPDATE', 'project', projectId, { deletedAt: null }, user.id);
+        // Recharger la liste
+        const allProjects = await db.projects.filter(p => !!p.deletedAt).toArray();
+        setDeletedProjects(allProjects.filter(p => userIdVariants.includes(p.userId)));
+      }
     } catch (error) {
       console.error('Error restoring project:', error);
       alert('فشل في استعادة المشروع');
@@ -46,11 +88,19 @@ const TrashPage: FC = () => {
 
     setLoading(projectId);
     try {
-      // Delete from IndexedDB
-      await db.projects.delete(projectId);
-      
-      // Note: Hard delete from server would require a separate API endpoint
-      // For now, we just remove from local storage
+      if (isWeb()) {
+        // 🌐 Web: API directe
+        await apiService.permanentDeleteProject(projectId.replace('project:', ''));
+        // Recharger la liste
+        const response = await apiService.getDeletedProjects();
+        setDeletedProjects(response.data || response || []);
+      } else {
+        // 🖥️ Electron: IndexedDB
+        await db.projects.delete(projectId);
+        // Recharger la liste
+        const allProjects = await db.projects.filter(p => !!p.deletedAt).toArray();
+        setDeletedProjects(allProjects.filter(p => userIdVariants.includes(p.userId)));
+      }
     } catch (error) {
       console.error('Error deleting project permanently:', error);
       alert('فشل في حذف المشروع نهائياً');
@@ -59,7 +109,7 @@ const TrashPage: FC = () => {
     }
   };
 
-  if (!deletedProjects) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>

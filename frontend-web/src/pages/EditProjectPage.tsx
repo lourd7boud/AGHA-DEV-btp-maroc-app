@@ -5,9 +5,11 @@ import { ArrowLeft, Save } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { db, Company } from '../db/database';
 import { v4 as uuidv4 } from 'uuid';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useProject, useCanModify } from '../hooks/useUnifiedData';
 import { saveCompany, extractCompanyFromProject } from '../services/companyService';
 import CompanyAutocomplete from '../components/CompanyAutocomplete';
+import { isWeb } from '../utils/platform';
+import { apiService } from '../services/apiService';
 
 const EditProjectPage: FC = () => {
   const { t } = useTranslation();
@@ -16,36 +18,11 @@ const EditProjectPage: FC = () => {
   const { user } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { canModify, reason: cannotModifyReason } = useCanModify();
 
-  // Try to get project with or without prefix
-  const project = useLiveQuery(async () => {
-    if (!id) {
-      console.log('❌ EditProjectPage: No ID provided');
-      return null;
-    }
-    console.log('🔍 EditProjectPage: Looking for project with ID:', id);
-    
-    // Try without prefix first
-    let proj = await db.projects.get(id);
-    console.log('  Try 1 (no prefix):', proj ? '✅ Found' : '❌ Not found');
-    
-    // If not found, try with prefix
-    if (!proj) {
-      proj = await db.projects.get(`project:${id}`);
-      console.log('  Try 2 (with prefix):', proj ? '✅ Found' : '❌ Not found');
-    }
-    
-    if (proj) {
-      console.log('✅ EditProjectPage: Project loaded:', proj.objet);
-    } else {
-      console.error('❌ EditProjectPage: Project not found in database');
-      // List all projects to debug
-      const allProjects = await db.projects.toArray();
-      console.log('📋 All projects in DB:', allProjects.map(p => ({ id: p.id, objet: p.objet })));
-    }
-    
-    return proj;
-  }, [id]);
+  // استخدام useProject بدلاً من useLiveQuery
+  const rawId = id?.startsWith('project:') ? id.replace('project:', '') : id;
+  const { project, isLoading: projectLoading } = useProject(rawId || null);
 
   const [formData, setFormData] = useState({
     objet: '',
@@ -73,6 +50,15 @@ const EditProjectPage: FC = () => {
     dateReceptionDefinitive: '', // Date réception définitive
   });
 
+  // Helper to extract date part (YYYY-MM-DD) from ISO string or date
+  const formatDateForInput = (dateStr: string | undefined | null): string => {
+    if (!dateStr) return '';
+    // If it's already YYYY-MM-DD format, return as is
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+    // Extract YYYY-MM-DD from ISO string
+    return dateStr.split('T')[0];
+  };
+
   // Charger les données du projet
   useEffect(() => {
     if (project) {
@@ -80,7 +66,7 @@ const EditProjectPage: FC = () => {
         objet: project.objet || '',
         marcheNo: project.marcheNo || '',
         annee: project.annee || '',
-        dateOuverture: project.dateOuverture || '',
+        dateOuverture: formatDateForInput(project.dateOuverture),
         typeMarche: project.typeMarche || 'normal',
         commune: project.commune || '',
         societe: project.societe || '',
@@ -95,9 +81,9 @@ const EditProjectPage: FC = () => {
         delaisExecution: project.delaisExecution?.toString() || '',
         status: project.status || 'draft',
         // Gestion des délais
-        osc: project.osc || '',
-        dateReceptionProvisoire: project.dateReceptionProvisoire || '',
-        dateReceptionDefinitive: project.dateReceptionDefinitive || '',
+        osc: formatDateForInput(project.osc),
+        dateReceptionProvisoire: formatDateForInput(project.dateReceptionProvisoire),
+        dateReceptionDefinitive: formatDateForInput(project.dateReceptionDefinitive),
       });
     }
   }, [project]);
@@ -105,6 +91,11 @@ const EditProjectPage: FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !project) return;
+    
+    if (!canModify) {
+      setError(cannotModifyReason || 'Vous devez être connecté pour modifier un projet');
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -112,8 +103,7 @@ const EditProjectPage: FC = () => {
     try {
       const now = new Date().toISOString();
 
-      const updatedProject = {
-        ...project,
+      const updatedProjectData = {
         objet: formData.objet,
         marcheNo: formData.marcheNo,
         annee: formData.annee,
@@ -138,6 +128,20 @@ const EditProjectPage: FC = () => {
         dateReceptionProvisoire: formData.dateReceptionProvisoire || undefined,
         dateReceptionDefinitive: formData.dateReceptionDefinitive || undefined,
         folderPath: `${formData.annee}/${formData.marcheNo}`,
+      };
+
+      // 🌐 Web: تحديث عبر API
+      if (isWeb()) {
+        await apiService.updateProject(rawId!, updatedProjectData);
+        console.log('✅ [WEB] Projet modifié via API');
+        navigate(`/projects/${rawId}`);
+        return;
+      }
+
+      // 🖥️ Electron: تحديث محلي مع sync
+      const updatedProject = {
+        ...project,
+        ...updatedProjectData,
         updatedAt: now,
       };
 
@@ -177,6 +181,16 @@ const EditProjectPage: FC = () => {
       setIsLoading(false);
     }
   };
+
+  if (!project && !projectLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center">
+          <p className="text-gray-500">{isWeb() ? 'Projet non trouvé sur le serveur' : 'Projet non trouvé'}</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!project) {
     return (
@@ -506,11 +520,10 @@ const EditProjectPage: FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Date d'ouverture *
+                Date d'ouverture
               </label>
               <input
                 type="date"
-                required
                 className="input"
                 value={formData.dateOuverture}
                 onChange={(e) => setFormData({ ...formData, dateOuverture: e.target.value })}

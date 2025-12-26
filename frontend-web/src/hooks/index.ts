@@ -5,7 +5,6 @@
 // Sync Manager
 export { 
   useSyncManager,
-  useSyncManagerV3,
   normalizeEntityId,
   cleanEntityId,
   getSyncLogs,

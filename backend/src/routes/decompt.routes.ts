@@ -7,7 +7,7 @@ import {
   updateDecompt,
   deleteDecompt,
   generateDecomptPDF,
-} from '../controllers/decompt.controller.pg';
+} from '../controllers/decompt.controller';
 
 const router = Router();
 router.use(authenticate);

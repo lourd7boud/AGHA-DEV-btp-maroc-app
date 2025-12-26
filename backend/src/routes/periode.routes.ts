@@ -6,12 +6,13 @@ import {
   getPeriodeById,
   updatePeriode,
   deletePeriode,
-} from '../controllers/periode.controller.pg';
+} from '../controllers/periode.controller';
 
 const router = Router();
 router.use(authenticate);
 
 router.post('/', createPeriode);
+router.post('/project/:projectId', createPeriode); // Alternative route for frontend compatibility
 router.get('/project/:projectId', getPeriodes);
 router.get('/:id', getPeriodeById);
 router.put('/:id', updatePeriode);

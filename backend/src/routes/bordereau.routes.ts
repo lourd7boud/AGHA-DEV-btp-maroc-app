@@ -6,7 +6,7 @@ import {
   getBordereauById,
   updateBordereau,
   deleteBordereau,
-} from '../controllers/bordereau.controller.pg';
+} from '../controllers/bordereau.controller';
 
 const router = Router();
 router.use(authenticate);

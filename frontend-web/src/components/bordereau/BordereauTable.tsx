@@ -1,8 +1,10 @@
-import { FC, useState, useEffect, useRef } from 'react';
+import { FC, useState, useEffect, useRef, useCallback } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/database';
 import { useAuthStore } from '../../store/authStore';
 import { logSyncOperation } from '../../services/syncService';
+import { isWeb } from '../../utils/platform';
+import { apiService } from '../../services/apiService';
 import {
   ArrowLeft,
   Plus,
@@ -23,12 +25,22 @@ interface BordereauLigne {
   montant: number;
 }
 
+interface Bordereau {
+  id: string;
+  projectId: string;
+  reference: string;
+  designation: string;
+  lignes: BordereauLigne[];
+  montantTotal: number;
+}
+
 interface Props {
   bordereauId: string;
   onClose: () => void;
+  onSaved?: () => void; // Callback to refresh parent data after save
 }
 
-const BordereauTable: FC<Props> = ({ bordereauId, onClose }) => {
+const BordereauTable: FC<Props> = ({ bordereauId, onClose, onSaved }) => {
   const { user } = useAuthStore();
   const [lignes, setLignes] = useState<BordereauLigne[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -36,11 +48,49 @@ const BordereauTable: FC<Props> = ({ bordereauId, onClose }) => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
+  
+  // 🌐 Web mode: use state for bordereau
+  const [webBordereau, setWebBordereau] = useState<Bordereau | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const bordereau = useLiveQuery(
-    () => db.bordereaux.get(bordereauId),
+  // 🖥️ Electron mode: use Dexie
+  const dexieBordereau = useLiveQuery(
+    () => isWeb() ? Promise.resolve(undefined) : db.bordereaux.get(bordereauId),
     [bordereauId]
-  );
+  ) as Bordereau | undefined;
+
+  // Get raw ID for API calls
+  const rawBordereauId = bordereauId?.includes(':') ? bordereauId.split(':').pop()! : bordereauId;
+
+  // 🌐 Fetch bordereau from API for Web mode
+  const fetchBordereau = useCallback(async () => {
+    if (!isWeb() || !rawBordereauId) return;
+    
+    try {
+      setIsLoading(true);
+      console.log(`🌐 [BordereauTable] Fetching bordereau ${rawBordereauId}...`);
+      const response = await apiService.getBordereau(rawBordereauId);
+      const data = response.data || response;
+      console.log(`✅ [BordereauTable] Loaded bordereau:`, data);
+      setWebBordereau(data);
+    } catch (err) {
+      console.error(`❌ [BordereauTable] Failed to fetch bordereau:`, err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [rawBordereauId]);
+
+  // Load data on mount for Web mode
+  useEffect(() => {
+    if (isWeb()) {
+      fetchBordereau();
+    } else {
+      setIsLoading(false);
+    }
+  }, [fetchBordereau]);
+
+  // Use the appropriate bordereau based on platform
+  const bordereau: Bordereau | null | undefined = isWeb() ? webBordereau : dexieBordereau;
 
   const suggestions = searchQuery.length >= 2 
     ? searchTemplates(searchQuery).slice(0, 5)
@@ -149,16 +199,35 @@ const BordereauTable: FC<Props> = ({ bordereauId, onClose }) => {
       updatedAt: new Date().toISOString(),
     };
 
-    await db.bordereaux.update(bordereauId, updated);
-    await logSyncOperation(
-      'UPDATE',
-      'bordereau',
-      bordereauId.replace('bordereau:', ''),
-      updated,
-      user.id
-    );
-
-    alert('Bordereau enregistré avec succès !');
+    if (isWeb()) {
+      // 🌐 Web: use API
+      try {
+        console.log('📤 [BordereauTable] Saving bordereau...');
+        await apiService.updateBordereau(rawBordereauId, {
+          lignes,
+          montantTotal: montantHT,
+        });
+        setWebBordereau(updated as Bordereau);
+        console.log('✅ [BordereauTable] Bordereau saved');
+        // Notify parent to refresh data (project montant updated)
+        if (onSaved) onSaved();
+        alert('Bordereau enregistré avec succès !');
+      } catch (error) {
+        console.error('❌ [BordereauTable] Failed to save:', error);
+        alert('Erreur lors de l\'enregistrement');
+      }
+    } else {
+      // 🖥️ Electron: use IndexedDB + sync
+      await db.bordereaux.update(bordereauId, updated);
+      await logSyncOperation(
+        'UPDATE',
+        'bordereau',
+        bordereauId.replace('bordereau:', ''),
+        updated,
+        user.id
+      );
+      alert('Bordereau enregistré avec succès !');
+    }
   };
 
   const handleExport = () => {
@@ -181,7 +250,7 @@ const BordereauTable: FC<Props> = ({ bordereauId, onClose }) => {
     link.click();
   };
 
-  if (!bordereau) {
+  if (isLoading || !bordereau) {
     return (
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">

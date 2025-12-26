@@ -1,6 +1,5 @@
 /**
- * Sync Service - Re-exporting from v2 for backward compatibility
- * All new code should import from syncServiceV2.ts directly
+ * Sync Service - Main Export
  */
 
 export {
@@ -18,5 +17,5 @@ export {
   normalizeEntityId,
   cleanEntityId,
   SYNC_CONFIG,
-} from './syncServiceV2';
+} from './syncServiceCore';
 

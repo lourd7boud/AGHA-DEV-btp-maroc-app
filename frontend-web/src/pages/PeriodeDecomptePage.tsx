@@ -1,6 +1,5 @@
-import { FC, useState, useEffect } from 'react';
+import { FC, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { useAuthStore } from '../store/authStore';
 import { format } from 'date-fns';
@@ -14,24 +13,39 @@ import {
   FileText,
   TrendingUp,
   DollarSign,
+  Printer,
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { logSyncOperation } from '../services/syncService';
 import { generateDecomptePDF } from '../utils/decomptePdfExport';
+import { useServerProjectDetails } from '../hooks/useServerData';
 
-// Fonction d'arrondi comptable standard à 2 décimales
-// FIX v1.0.1: Changé de Math.ceil à Math.round pour éviter les majorations non justifiées
-// Math.round: arrondi au plus proche (0.005 → 0.01, 0.004 → 0.00)
-// Utilisé pour TVA et tous les montants comptables
-const majoration = (value: number): number => {
-  return Math.round(value * 100) / 100;
+// ============================================================
+// FONCTIONS DE CALCUL COMPTABLE
+// ============================================================
+// التقريب العادي: لكل الحسابات (HT, TTC, الكميات...)
+// القطع: فقط لـ TVA (يقطع بعد رقمين من الفاصلة بدون تقريب)
+// ============================================================
+
+// دالة التقريب العادي - لكل الحسابات ما عدا TVA
+const arrondi2 = (value: number | undefined | null): number => {
+  const num = Number(value) || 0;
+  return Math.round(num * 100) / 100;
 };
 
-// Fonction de formatage monétaire - garantit exactement 2 décimales
-// Utilisée pour l'affichage de tous les montants (TVA, HT, TTC)
-const formatMontant = (value: number): string => {
-  const rounded = Math.round(value * 100) / 100;
-  return rounded.toLocaleString('fr-MA', { 
+// Alias للتوافق
+const majoration = arrondi2;
+
+// دالة القطع - فقط لـ TVA
+// مثال: 164921.486 → 164921.48 (وليس 164921.49)
+const truncTVA = (value: number): number => {
+  return Math.trunc(value * 100) / 100;
+};
+
+// دالة الفورمات للعرض
+const formatMontant = (value: number | undefined | null): string => {
+  const num = Number(value) || 0;
+  return num.toLocaleString('fr-MA', { 
     minimumFractionDigits: 2, 
     maximumFractionDigits: 2 
   });
@@ -73,61 +87,63 @@ const PeriodeDecomptePage: FC = () => {
   const [decomptesPrecedents, setDecomptesPrecedents] = useState(0);
   const [depensesExercicesAnterieurs, setDepensesExercicesAnterieurs] = useState(0);
 
-  // Normalize IDs - ensure they have the correct prefix
+  // Clean IDs (without prefix) for API calls
+  const cleanProjectId = rawProjectId?.includes(':') ? rawProjectId.split(':').pop()! : rawProjectId;
+  // cleanPeriodeId used for debugging if needed
+  const _cleanPeriodeId = rawPeriodeId?.includes(':') ? rawPeriodeId.split(':').pop()! : rawPeriodeId;
+  void _cleanPeriodeId; // Suppress unused warning
+
+  // Normalize IDs - ensure they have the correct prefix for IndexedDB
   const projectId = rawProjectId?.includes(':') ? rawProjectId : `project:${rawProjectId}`;
   const periodeId = rawPeriodeId?.includes(':') ? rawPeriodeId : `periode:${rawPeriodeId}`;
 
-  // Charger les données du projet
-  const project = useLiveQuery(
-    () => (projectId ? db.projects.get(projectId) : undefined),
-    [projectId]
-  );
+  // 🔴 SERVER-FIRST: Load data from server first, then use IndexedDB for reactivity
+  const { 
+    project: serverProject, 
+    bordereaux: serverBordereaux,
+    periodes: serverPeriodes,
+    metres: serverMetres,
+    decompts: serverDecompts,
+    isLoading: serverLoading, 
+    error: serverError,
+    refresh: refreshServerData
+  } = useServerProjectDetails(cleanProjectId || '', user?.id || null);
 
-  // Charger la période
-  const periode = useLiveQuery(
-    () => (periodeId ? db.periodes.get(periodeId) : undefined),
-    [periodeId]
-  );
+  // Get specific data from server-loaded arrays
+  const project = serverProject;
+  const bordereau = useMemo(() => serverBordereaux?.find(b => !b.deletedAt), [serverBordereaux]);
+  const periode = useMemo(() => serverPeriodes?.find(p => {
+    const pId = p.id?.includes(':') ? p.id : `periode:${p.id}`;
+    return pId === periodeId && !p.deletedAt;
+  }), [serverPeriodes, periodeId]);
+  
+  // Get metres for this specific periode
+  const metres = useMemo(() => {
+    return serverMetres?.filter(m => {
+      const mPeriodeId = m.periodeId?.includes(':') ? m.periodeId : `periode:${m.periodeId}`;
+      return mPeriodeId === periodeId && !m.deletedAt;
+    }) || [];
+  }, [serverMetres, periodeId]);
 
-  // Charger le bordereau du projet
-  const bordereau = useLiveQuery(
-    () =>
-      projectId
-        ? db.bordereaux
-            .where('projectId')
-            .equals(projectId)
-            .and((b) => !b.deletedAt)
-            .first()
-        : undefined,
-    [projectId]
-  );
+  // Get existing decompte for this periode
+  const existingDecompte = useMemo(() => {
+    return serverDecompts?.find(d => {
+      const dPeriodeId = d.periodeId?.includes(':') ? d.periodeId : `periode:${d.periodeId}`;
+      return dPeriodeId === periodeId && !d.deletedAt;
+    });
+  }, [serverDecompts, periodeId]);
 
-  // Charger tous les métrés de cette période
-  const metres = useLiveQuery(
-    async () => {
-      if (!periodeId) return [];
-      return await db.metres
-        .where('periodeId')
-        .equals(periodeId)
-        .and((m) => !m.deletedAt)
-        .toArray();
-    },
-    [periodeId],
-    []
-  );
-
-  // Charger le décompte existant (s'il existe)
-  const existingDecompte = useLiveQuery(
-    () =>
-      periodeId
-        ? db.decompts
-            .where('periodeId')
-            .equals(periodeId)
-            .and((d) => !d.deletedAt)
-            .first()
-        : undefined,
-    [periodeId]
-  );
+  console.log('🔍 [DECOMPTE] Server data loaded:', { 
+    hasProject: !!project, 
+    hasBordereau: !!bordereau, 
+    hasPeriode: !!periode,
+    metresCount: metres.length,
+    serverMetresCount: serverMetres?.length,
+    periodeId,
+    serverLoading,
+    serverError,
+    metres: metres.map(m => ({ id: m.id, periodeId: m.periodeId, bordereauLigneId: m.bordereauLigneId, totalCumule: m.totalCumule, totalPartiel: m.totalPartiel }))
+  });
 
   // Charger les paramètres financiers depuis la période
   useEffect(() => {
@@ -233,7 +249,7 @@ const PeriodeDecomptePage: FC = () => {
     if (bordereau && metres.length > 0) {
       const cleanBordereauId = normalizeBordereauLigneId(bordereau.id);
       
-      const decompteLines: DecompteLigne[] = bordereau.lignes.map((ligne) => {
+      const decompteLines: DecompteLigne[] = bordereau.lignes.map((ligne: { numero: number; designation: string; unite: string; quantite: number; prixUnitaire?: number }) => {
         const ligneId = `${cleanBordereauId}-ligne-${ligne.numero}`;
         
         // Trouver le métré correspondant (compare normalized IDs)
@@ -266,7 +282,7 @@ const PeriodeDecomptePage: FC = () => {
       const cleanBordereauId = normalizeBordereauLigneId(bordereau.id);
       
       // إذا لم يكن هناك ميتري، عرض البوردرو فقط بكميات صفر
-      const decompteLines: DecompteLigne[] = bordereau.lignes.map((ligne) => {
+      const decompteLines: DecompteLigne[] = bordereau.lignes.map((ligne: { numero: number; designation: string; unite: string; quantite: number; prixUnitaire?: number }) => {
         const prixUnitaireHT = majoration(ligne.prixUnitaire || 0);
         return {
           prixNo: ligne.numero,
@@ -283,10 +299,18 @@ const PeriodeDecomptePage: FC = () => {
     }
   }, [bordereau, metres]);
 
-  // Calculs automatiques avec majoration
-  const totalHT = majoration(lignes.reduce((sum, ligne) => sum + ligne.montantHT, 0));
-  const montantTVA = majoration((totalHT * tauxTVA) / 100);
-  const totalTTC = majoration(totalHT + montantTVA);
+  // ============================================================
+  // CALCULS FINANCIERS
+  // ============================================================
+  // Total HT: تقريب عادي
+  const totalHT = arrondi2(lignes.reduce((sum, ligne) => sum + (Number(ligne.montantHT) || 0), 0));
+  // TVA: قطع فقط (بدون تقريب) - هذا إلزامي للتطبيقات الحكومية
+  const montantTVA = truncTVA(totalHT * (Number(tauxTVA) || 20) / 100);
+  // TTC: تقريب عادي
+  const totalTTC = arrondi2(totalHT + montantTVA);
+  
+  // Log للتحقق
+  console.log("[FINAL TOTALS]", { totalHT, montantTVA, totalTTC, tauxTVA });
 
   // Récapitulatif
   const getRecapCalculations = (): RecapCalculations => {
@@ -310,7 +334,7 @@ const PeriodeDecomptePage: FC = () => {
 
     // RETENUE DE GARANTIE: MIN(10% du décompte TTC, 7% du montant total du marché)
     // Formule Excel: =+MIN(TRUNC(I28*10%;2);TRUNC(K28*7%;2))
-    const montantMarcheTTC = majoration(bordereau?.lignes.reduce((sum, ligne) => {
+    const montantMarcheTTC = majoration(bordereau?.lignes.reduce((sum: number, ligne: { quantite: number; prixUnitaire?: number }) => {
       const montantHT = majoration(ligne.quantite * (ligne.prixUnitaire || 0));
       return sum + majoration(montantHT * 1.2); // +20% TVA
     }, 0) || 0);
@@ -501,12 +525,105 @@ const PeriodeDecomptePage: FC = () => {
     }
   };
 
+  // Fonction d'impression directe
+  const handlePrint = async () => {
+    if (!project || !periode || !bordereau || !projectId) {
+      alert('Données manquantes pour imprimer');
+      return;
+    }
+
+    try {
+      // Récupérer les décomptes précédents pour l'impression
+      const decomptsPrecedentsAvecDates = (serverDecompts || [])
+        .filter((d) => d.numero < periode.numero)
+        .map((decompt) => {
+          const periodeDecompt = serverPeriodes?.find(
+            (p) => p.id === decompt.periodeId || 
+                   p.id === decompt.periodeId.replace('periode:', '') ||
+                   `periode:${p.id}` === decompt.periodeId
+          );
+          return {
+            numero: decompt.numero,
+            date: periodeDecompt ? new Date(periodeDecompt.dateFin).toLocaleDateString('fr-FR') : '',
+            montant: decompt.montantTotal,
+            isDecompteDernier: periodeDecompt?.isDecompteDernier || false,
+          };
+        })
+        .sort((a, b) => a.numero - b.numero);
+
+      await generateDecomptePDF(
+        project,
+        periode,
+        bordereau,
+        lignes,
+        recap,
+        tauxTVA,
+        totalHT,
+        montantTVA,
+        totalTTC,
+        decomptsPrecedentsAvecDates,
+        true // طباعة مباشرة
+      );
+    } catch (error) {
+      console.error('Erreur lors de l\'impression:', error);
+      alert('Erreur lors de l\'impression');
+    }
+  };
+
+  // Show loading state
+  if (serverLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-500">Chargement des données du serveur...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (serverError) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center text-red-600">
+          <p className="text-lg font-medium mb-2">Erreur de chargement</p>
+          <p className="text-sm">{serverError}</p>
+          <button 
+            onClick={refreshServerData} 
+            className="mt-4 btn-primary"
+          >
+            Réessayer
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!project || !periode || !bordereau) {
+    console.log('🔴 [DECOMPTE] Missing data after server load:', { 
+      hasProject: !!project, 
+      hasPeriode: !!periode, 
+      hasBordereau: !!bordereau,
+      projectId,
+      periodeId,
+      serverPeriodesCount: serverPeriodes?.length,
+      serverBordereauxCount: serverBordereaux?.length
+    });
     return (
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-500">Chargement...</p>
+          <p className="text-xs text-gray-400 mt-2">
+            Project: {project ? '✓' : '✗'} | Période: {periode ? '✓' : '✗'} | Bordereau: {bordereau ? '✓' : '✗'}
+          </p>
+          <button 
+            onClick={refreshServerData} 
+            className="mt-4 text-sm text-primary-600 hover:underline"
+          >
+            Rafraîchir les données
+          </button>
         </div>
       </div>
     );
@@ -517,11 +634,11 @@ const PeriodeDecomptePage: FC = () => {
       {/* Header */}
       <div className="mb-6">
         <button
-          onClick={() => navigate(`/projects/${rawProjectId}/metres`)}
+          onClick={() => navigate(`/projects/${rawProjectId}`)}
           className="btn-secondary mb-4 flex items-center gap-2"
         >
           <ArrowLeft className="w-4 h-4" />
-          Retour aux périodes
+          Retour au projet
         </button>
 
         <div className="flex items-center justify-between">
@@ -541,6 +658,10 @@ const PeriodeDecomptePage: FC = () => {
             <button onClick={handleExportPDF} className="btn-secondary flex items-center gap-2">
               <Download className="w-5 h-5" />
               Exporter PDF
+            </button>
+            <button onClick={handlePrint} className="btn-secondary flex items-center gap-2">
+              <Printer className="w-5 h-5" />
+              Imprimer
             </button>
             <button
               onClick={handleSave}
@@ -577,7 +698,7 @@ const PeriodeDecomptePage: FC = () => {
             <span className="font-semibold text-gray-700">Montant du marché (TTC):</span>
             <p className="text-gray-900 font-bold text-primary-600">
               {bordereau.lignes
-                .reduce((sum, l) => {
+                .reduce((sum: number, l: { quantite: number; prixUnitaire?: number }) => {
                   const montantHT = l.quantite * (l.prixUnitaire || 0);
                   const montantTTC = montantHT * 1.2; // +20% TVA
                   return sum + montantTTC;

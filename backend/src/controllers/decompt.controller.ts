@@ -1,86 +1,131 @@
 import { Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { getCouchDB } from '../config/database';
+import { getPool } from '../config/postgres';
 import { ApiError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-import { Decompt } from '../models/types';
+import logger from '../utils/logger';
+import { keysToCamel } from '../utils/transform';
 
+/**
+ * Create decompt (PostgreSQL version)
+ */
 export const createDecompt = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    console.log('=== DECOMPT CREATE REQUEST ===');
+    logger.info('Creating decompt...');
+    
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
-    const { projectId, periode, numero, lignes } = req.body;
+    const { 
+      projectId, 
+      periodeId, 
+      numero, 
+      dateDecompte, 
+      montantCumule, 
+      montantPrecedent, 
+      montantActuel, 
+      montantTotal, 
+      isDernier 
+    } = req.body;
 
-    if (!projectId || !periode || numero === undefined) {
-      throw new ApiError('Required fields missing', 400);
+    if (!projectId || numero === undefined) {
+      throw new ApiError('Project ID and numero required', 400);
     }
 
-    const db = getCouchDB();
+    const pool = getPool();
+    const decomptId = uuidv4();
 
-    // Calculer le montant total
-    let montantTotal = 0;
-    if (lignes && Array.isArray(lignes)) {
-      montantTotal = lignes.reduce((sum, ligne) => sum + (ligne.montant || 0), 0);
+    // Check project exists and belongs to user
+    const projectCheck = await pool.query(
+      'SELECT id FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL',
+      [projectId, req.user.id]
+    );
+
+    if (projectCheck.rows.length === 0) {
+      throw new ApiError('Project not found or not authorized', 404);
     }
 
-    const decompt: Decompt = {
-      _id: `decompt:${uuidv4()}`,
-      projectId,
-      userId: req.user.id,
-      periode,
-      numero: parseInt(numero),
-      lignes: lignes || [],
-      montantTotal,
-      statut: 'draft',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const result = await pool.query(
+      `INSERT INTO decompts (
+        id, project_id, periode_id, numero, date_decompte, 
+        montant_cumule, montant_precedent, montant_actuel, montant_total, 
+        is_dernier, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+       RETURNING *`,
+      [
+        decomptId, 
+        projectId, 
+        periodeId || null, 
+        numero,
+        dateDecompte ? new Date(dateDecompte) : null,
+        montantCumule || 0,
+        montantPrecedent || 0,
+        montantActuel || 0,
+        montantTotal || 0,
+        isDernier || false
+      ]
+    );
 
-    const result = await db.insert({ ...decompt, type: 'decompt' });
+    logger.info(`Decompt created: ${decomptId}`);
 
     res.status(201).json({
       success: true,
-      data: { ...decompt, _rev: result.rev },
+      data: keysToCamel(result.rows[0]),
     });
   } catch (error) {
+    logger.error('Error creating decompt:', error);
     next(error);
   }
 };
 
+/**
+ * Get all decompts for a project (PostgreSQL version)
+ */
 export const getDecompts = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    console.log('=== DECOMPTS GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;
-    const db = getCouchDB();
+    const pool = getPool();
 
-    const result = await db.find({
-      selector: {
-        type: 'decompt',
-        projectId,
-        userId: req.user.id,
-        deletedAt: { $exists: false },
-      },
-    });
+    // Verify project ownership
+    const projectCheck = await pool.query(
+      'SELECT id FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL',
+      [projectId, req.user.id]
+    );
+
+    if (projectCheck.rows.length === 0) {
+      throw new ApiError('Project not found or not authorized', 404);
+    }
+
+    const result = await pool.query(
+      `SELECT * FROM decompts WHERE project_id = $1 AND deleted_at IS NULL ORDER BY numero ASC`,
+      [projectId]
+    );
 
     res.json({
       success: true,
-      data: result.docs,
-      count: result.docs.length,
+      data: keysToCamel(result.rows),
+      count: result.rows.length,
     });
   } catch (error) {
+    logger.error('Error fetching decompts:', error);
     next(error);
   }
 };
 
+/**
+ * Get decompt by ID (PostgreSQL version)
+ */
 export const getDecomptById = async (
   req: AuthRequest,
   res: Response,
@@ -90,68 +135,116 @@ export const getDecomptById = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const decompt = await db.get(`decompt:${id}`);
+    const pool = getPool();
 
-    if (decompt.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    const result = await pool.query(
+      `SELECT d.* FROM decompts d
+       INNER JOIN projects p ON d.project_id = p.id
+       WHERE d.id = $1 AND p.user_id = $2 AND d.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new ApiError('Decompt not found', 404);
     }
 
-    res.json({ success: true, data: decompt });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('Decompt not found', 404));
-    } else {
-      next(error);
-    }
+    res.json({
+      success: true,
+      data: keysToCamel(result.rows[0]),
+    });
+  } catch (error) {
+    next(error);
   }
 };
 
+/**
+ * Update decompt (PostgreSQL version)
+ */
 export const updateDecompt = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    console.log('=== DECOMPT UPDATE REQUEST ===');
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const decompt = await db.get(`decompt:${id}`);
+    const { 
+      periodeId, 
+      numero, 
+      dateDecompte, 
+      montantCumule, 
+      montantPrecedent, 
+      montantActuel, 
+      montantTotal,
+      totalTTC,
+      lignes,
+      isDernier,
+      statut
+    } = req.body;
+    const pool = getPool();
 
-    if (decompt.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    // Check ownership
+    const existing = await pool.query(
+      `SELECT d.* FROM decompts d
+       INNER JOIN projects p ON d.project_id = p.id
+       WHERE d.id = $1 AND p.user_id = $2 AND d.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (existing.rows.length === 0) {
+      throw new ApiError('Decompt not found', 404);
     }
 
-    const updated = {
-      ...decompt,
-      ...req.body,
-      updatedAt: new Date(),
-    };
+    const result = await pool.query(
+      `UPDATE decompts SET 
+        periode_id = COALESCE($1, periode_id),
+        numero = COALESCE($2, numero),
+        date_decompte = COALESCE($3, date_decompte),
+        montant_cumule = COALESCE($4, montant_cumule),
+        montant_precedent = COALESCE($5, montant_precedent),
+        montant_actuel = COALESCE($6, montant_actuel),
+        montant_total = COALESCE($7, montant_total),
+        total_ttc = COALESCE($8, total_ttc),
+        lignes = COALESCE($9, lignes),
+        is_dernier = COALESCE($10, is_dernier),
+        statut = COALESCE($11, statut),
+        updated_at = NOW()
+       WHERE id = $12 RETURNING *`,
+      [
+        periodeId, 
+        numero, 
+        dateDecompte ? new Date(dateDecompte) : null, 
+        montantCumule, 
+        montantPrecedent, 
+        montantActuel, 
+        montantTotal,
+        totalTTC,
+        lignes ? JSON.stringify(lignes) : null,
+        isDernier,
+        statut,
+        id
+      ]
+    );
 
-    // Recalculer le montant total si lignes modifiées
-    if (updated.lignes) {
-      updated.montantTotal = updated.lignes.reduce(
-        (sum: number, ligne: any) => sum + (ligne.montant || 0),
-        0
-      );
-    }
-
-    const result = await db.insert(updated);
+    logger.info(`Decompt updated: ${id}`);
 
     res.json({
       success: true,
-      data: { ...updated, _rev: result.rev },
+      data: keysToCamel(result.rows[0]),
     });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('Decompt not found', 404));
-    } else {
-      next(error);
-    }
+  } catch (error) {
+    logger.error('Error updating decompt:', error);
+    next(error);
   }
 };
 
+/**
+ * Delete decompt (PostgreSQL version)
+ */
 export const deleteDecompt = async (
   req: AuthRequest,
   res: Response,
@@ -161,30 +254,39 @@ export const deleteDecompt = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const decompt = await db.get(`decompt:${id}`);
+    const pool = getPool();
 
-    if (decompt.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    // Check ownership
+    const existing = await pool.query(
+      `SELECT d.* FROM decompts d
+       INNER JOIN projects p ON d.project_id = p.id
+       WHERE d.id = $1 AND p.user_id = $2 AND d.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (existing.rows.length === 0) {
+      throw new ApiError('Decompt not found', 404);
     }
 
-    decompt.deletedAt = new Date();
-    decompt.updatedAt = new Date();
-    await db.insert(decompt);
+    await pool.query(
+      `UPDATE decompts SET deleted_at = NOW() WHERE id = $1`,
+      [id]
+    );
+
+    logger.info(`Decompt deleted: ${id}`);
 
     res.json({
       success: true,
       message: 'Decompt deleted successfully',
     });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('Decompt not found', 404));
-    } else {
-      next(error);
-    }
+  } catch (error) {
+    next(error);
   }
 };
 
+/**
+ * Generate decompt PDF (PostgreSQL version)
+ */
 export const generateDecomptPDF = async (
   req: AuthRequest,
   res: Response,
@@ -194,26 +296,28 @@ export const generateDecomptPDF = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const db = getCouchDB();
-    const decompt = await db.get(`decompt:${id}`);
+    const pool = getPool();
 
-    if (decompt.userId !== req.user.id) {
-      throw new ApiError('Not authorized', 403);
+    // Get decompt with project info
+    const result = await pool.query(
+      `SELECT d.*, p.objet, p.marche_no, p.societe
+       FROM decompts d
+       INNER JOIN projects p ON d.project_id = p.id
+       WHERE d.id = $1 AND p.user_id = $2 AND d.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new ApiError('Decompt not found', 404);
     }
 
-    // TODO: Implémenter la génération de PDF
-    // Utiliser une bibliothèque comme pdfkit ou puppeteer
-
+    // For now, return the data that would be used for PDF generation
     res.json({
       success: true,
-      message: 'PDF generation not yet implemented',
-      data: decompt,
+      message: 'PDF generation endpoint - data ready',
+      data: result.rows[0],
     });
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      next(new ApiError('Decompt not found', 404));
-    } else {
-      next(error);
-    }
+  } catch (error) {
+    next(error);
   }
 };

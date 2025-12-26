@@ -105,6 +105,7 @@ export interface MetreSection {
   ordre: number;                    // Ordre d'affichage
   couleur?: string;                 // Couleur pour différencier (optionnel)
   isCollapsed?: boolean;            // État plié/déplié
+  isFromPreviousPeriode?: boolean;  // 🔴 لتحديد إذا كان من فترة سابقة
 }
 
 /**
@@ -117,6 +118,8 @@ export interface MetreSubSection {
   titre: string;                    // Titre (ex: "semeille", "radier + voile")
   ordre: number;                    // Ordre d'affichage dans la section
   isCollapsed?: boolean;            // État plié/déplié
+  nombreElements?: number;          // Nombre d'éléments/structures (ex: nombre de poteaux)
+  isFromPreviousPeriode?: boolean;  // 🔴 لتحديد إذا كان من فترة سابقة
 }
 
 /**
@@ -142,6 +145,7 @@ export interface MetreLigne {
   // Résultats
   partiel: number;
   observations?: string;
+  isFromPreviousPeriode?: boolean;  // 🔴 لتحديد إذا كان من فترة سابقة
 }
 
 export interface Metre {

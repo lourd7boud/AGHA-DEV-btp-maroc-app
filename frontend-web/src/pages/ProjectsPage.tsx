@@ -1,10 +1,10 @@
-import { FC, useState } from 'react';
+import { FC, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/database';
 import { useAuthStore } from '../store/authStore';
-import { logSyncOperation } from '../services/syncService';
+import { useProjects } from '../hooks/useUnifiedData';
+import { apiService } from '../services/apiService';
+import { isWeb } from '../utils/platform';
 import {
   Plus,
   Search,
@@ -18,6 +18,9 @@ import {
   List,
   FileText,
   TrendingUp,
+  Loader2,
+  WifiOff,
+  RefreshCw,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -30,27 +33,65 @@ const ProjectsPage: FC = () => {
   const [yearFilter, setYearFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  const projects = useLiveQuery(
-    () => db.projects.where('userId').equals(user?.id || '').and((p) => !p.deletedAt).toArray(),
-    [user?.id]
-  );
+  // Server-first data loading
+  const { projects, isLoading, error, refresh } = useProjects(user?.id || null);
+  
+  // Online status for Web
+  const isOnline = navigator.onLine;
+  const canModify = isOnline || !isWeb();
+  const cannotModifyReason = !isOnline && isWeb() ? 'Non disponible hors ligne' : null;
 
-  const bordereaux = useLiveQuery(
-    () => db.bordereaux.where('userId').equals(user?.id || '').and((b) => !b.deletedAt).toArray(),
-    [user?.id]
-  );
+  // 🌐 Web: تحميل bordereaux من API لكل المشاريع
+  const [bordereaux, setBordereaux] = useState<any[]>([]);
+  
+  useEffect(() => {
+    const loadBordereaux = async () => {
+      if (!projects?.length) {
+        setBordereaux([]);
+        return;
+      }
+      
+      const allBordereaux: any[] = [];
+      
+      await Promise.all(projects.map(async (project) => {
+        const cleanId = project.id?.replace('project:', '') || project.id;
+        try {
+          const res = await apiService.getBordereaux(cleanId);
+          const data = res.data || res;
+          if (Array.isArray(data)) {
+            allBordereaux.push(...data.map(b => ({ ...b, projectId: project.id })));
+          }
+        } catch (e) { /* No bordereau */ }
+      }));
+      
+      setBordereaux(allBordereaux.filter(b => !b.deletedAt));
+    };
+    
+    loadBordereaux();
+  }, [projects]);
 
   // Helper pour calculer le montant TTC d'un projet
   const getProjectMontantTTC = (projectId: string): number => {
-    if (!bordereaux) return 0;
-    const bordereau = bordereaux.find((b) => b.projectId === projectId);
-    if (!bordereau) return 0;
-    const montantHT = bordereau.lignes.reduce((sum, ligne) => sum + (ligne.quantite * (ligne.prixUnitaire || 0)), 0);
+    if (!bordereaux?.length) return 0;
+    // تطبيع المعرفات للمقارنة
+    const cleanProjectId = projectId?.replace('project:', '') || projectId;
+    const bordereau = bordereaux.find((b) => {
+      const bProjectId = (b.projectId || b.project_id)?.replace('project:', '') || b.projectId;
+      return bProjectId === cleanProjectId || b.projectId === projectId;
+    });
+    if (!bordereau || !bordereau.lignes) return 0;
+    const montantHT = bordereau.lignes.reduce((sum: number, ligne: any) => sum + ((ligne.quantite || 0) * (ligne.prixUnitaire || ligne.prix_unitaire || 0)), 0);
     return montantHT * 1.2; // +20% TVA
   };
 
   // Obtenir les années uniques
   const uniqueYears = Array.from(new Set(projects?.map((p) => p.annee) || [])).sort().reverse();
+
+  // 🆕 استخراج الرقم الأول من رقم المشروع للترتيب (مثل 12/2025/DPA/TA -> 12)
+  const extractFirstNumber = (marcheNo: string): number => {
+    const match = marcheNo?.match(/^(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  };
 
   const filteredProjects = projects?.filter((p) => {
     const matchesSearch =
@@ -60,6 +101,9 @@ const ProjectsPage: FC = () => {
     const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
     const matchesYear = yearFilter === 'all' || p.annee === yearFilter;
     return matchesSearch && matchesStatus && matchesYear;
+  })?.sort((a, b) => {
+    // 🆕 ترتيب تصاعدي حسب الرقم الأول من رقم المشروع (1, 3, 23...)
+    return extractFirstNumber(a.marcheNo) - extractFirstNumber(b.marcheNo);
   });
 
   const handleDeleteProject = async (projectId: string, e: React.MouseEvent) => {
@@ -68,17 +112,15 @@ const ProjectsPage: FC = () => {
     
     if (!user || !confirm('Êtes-vous sûr de vouloir supprimer ce projet?')) return;
 
-    const project = await db.projects.get(projectId);
-    if (!project) return;
-
-    // Soft delete
-    await db.projects.update(projectId, {
-      deletedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-
-    // Log sync operation
-    await logSyncOperation('DELETE', 'project', projectId.replace('project:', ''), project, user.id);
+    try {
+      const cleanId = projectId?.replace('project:', '') || projectId;
+      await apiService.deleteProject(cleanId);
+      // Rafraîchir la liste
+      refresh();
+    } catch (err) {
+      console.error('Failed to delete project:', err);
+      alert('Erreur lors de la suppression du projet');
+    }
   };
 
   // Statistiques
@@ -116,6 +158,33 @@ const ProjectsPage: FC = () => {
     }
   };
 
+  // Show loading state on Web when fetching from server
+  if (isLoading && isWeb()) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600 mb-4" />
+        <p className="text-gray-600">Chargement des projets depuis le serveur...</p>
+      </div>
+    );
+  }
+
+  // Show error state on Web when offline
+  if (error && isWeb()) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64">
+        <WifiOff className="w-12 h-12 text-red-500 mb-4" />
+        <p className="text-red-600 font-medium mb-2">{error}</p>
+        <button 
+          onClick={() => refresh()}
+          className="btn btn-primary flex items-center gap-2"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Réessayer
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div>
       {/* Header */}
@@ -126,11 +195,46 @@ const ProjectsPage: FC = () => {
             {stats.total} {stats.total > 1 ? 'projets' : 'projet'}
           </p>
         </div>
-        <Link to="/projects/new" className="btn btn-primary flex items-center gap-2">
-          <Plus className="w-5 h-5" />
-          {t('project.newProject')}
-        </Link>
+        <div className="flex items-center gap-2">
+          {/* Refresh button */}
+          <button 
+            onClick={() => refresh()}
+            disabled={isLoading}
+            className="btn btn-secondary flex items-center gap-2"
+            title="Rafraîchir depuis le serveur"
+          >
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
+          
+          {/* New project button - disabled if offline on Web */}
+          {canModify ? (
+            <Link to="/projects/new" className="btn btn-primary flex items-center gap-2">
+              <Plus className="w-5 h-5" />
+              {t('project.newProject')}
+            </Link>
+          ) : (
+            <button 
+              disabled 
+              className="btn btn-primary flex items-center gap-2 opacity-50 cursor-not-allowed"
+              title={cannotModifyReason || 'Non disponible hors ligne'}
+            >
+              <WifiOff className="w-5 h-5" />
+              {t('project.newProject')}
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Offline warning banner for Web */}
+      {!isOnline && isWeb() && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6 flex items-center gap-3">
+          <WifiOff className="w-5 h-5 text-yellow-600" />
+          <div>
+            <p className="font-medium text-yellow-800">Mode hors ligne</p>
+            <p className="text-sm text-yellow-700">Les modifications sont désactivées. Reconnectez-vous pour continuer.</p>
+          </div>
+        </div>
+      )}
 
       {/* Quick Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
@@ -286,8 +390,9 @@ const ProjectsPage: FC = () => {
             <div key={project.id} className="card hover:shadow-lg transition-shadow relative group">
               <Link to={`/projects/${projectId}`} className="block">
                 <div className="flex items-start justify-between mb-4">
-                  <h3 className="font-semibold text-lg text-gray-900 flex-1 pr-2 line-clamp-2">
-                    {project.objet}
+                  {/* 🆕 رقم المشروع يظهر في الأعلى كعنوان رئيسي */}
+                  <h3 className="font-bold text-lg text-primary-700 flex-1 pr-2">
+                    {project.marcheNo}
                   </h3>
                   <span
                     className={`flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full flex-shrink-0 ${getStatusColor(
@@ -298,6 +403,11 @@ const ProjectsPage: FC = () => {
                     {t(`project.status.${project.status}`)}
                   </span>
                 </div>
+
+                {/* 🆕 الاسم (Objet) يظهر تحت رقم المشروع */}
+                <p className="text-sm text-gray-700 mb-3 line-clamp-2 font-medium">
+                  {project.objet}
+                </p>
 
                 <div className="space-y-2 text-sm text-gray-600 mb-4">
                   <div className="flex justify-between">
@@ -371,8 +481,9 @@ const ProjectsPage: FC = () => {
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr className="border-b border-gray-200">
+                  {/* 🆕 رقم المشروع أولاً */}
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">N° Marché</th>
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Objet</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Marché</th>
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Année</th>
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Montant (TTC)</th>
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Statut</th>
@@ -391,13 +502,16 @@ const ProjectsPage: FC = () => {
                     className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
                     onClick={() => navigate(`/projects/${projectId}`)}
                   >
+                    {/* 🆕 رقم المشروع أولاً بخط عريض */}
+                    <td className="py-3 px-4">
+                      <div className="font-bold text-primary-700">{project.marcheNo}</div>
+                    </td>
                     <td className="py-3 px-4">
                       <div className="font-medium text-gray-900">{project.objet}</div>
                       {project.societe && (
                         <div className="text-xs text-gray-500">{project.societe}</div>
                       )}
                     </td>
-                    <td className="py-3 px-4 text-sm text-gray-600">{project.marcheNo}</td>
                     <td className="py-3 px-4 text-sm text-gray-600">{project.annee}</td>
                     <td className="py-3 px-4 text-sm font-medium text-primary-600">
                       {getProjectMontantTTC(project.id).toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD

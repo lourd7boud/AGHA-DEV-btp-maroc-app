@@ -8,7 +8,7 @@ import {
   getAttachments,
   getAttachmentById,
   deleteAttachment,
-} from '../controllers/attachment.controller.pg';
+} from '../controllers/attachment.controller';
 
 const router = Router();
 router.use(authenticate);

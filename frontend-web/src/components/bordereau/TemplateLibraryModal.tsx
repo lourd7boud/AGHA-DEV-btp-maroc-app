@@ -4,6 +4,8 @@ import { db } from '../../db/database';
 import { logSyncOperation } from '../../services/syncService';
 import { X, Search, Filter } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import { isWeb } from '../../utils/platform';
+import { apiService } from '../../services/apiService';
 import {
   bordereauTemplates,
   categories,
@@ -81,8 +83,20 @@ const TemplateLibraryModal: FC<Props> = ({ projectId, onClose, onCreated }) => {
       updatedAt: now,
     };
 
-    await db.bordereaux.add(newBordereau);
-    await logSyncOperation('CREATE', 'bordereau', bordereauId.replace('bordereau:', ''), newBordereau, user.id);
+    if (isWeb()) {
+      // Web: use API
+      await apiService.createBordereau({
+        projectId: projectId.replace('project:', ''),
+        reference: `BPU-${year}`,
+        designation: 'Bordereau des Prix Unitaires',
+        lignes,
+        montantTotal: 0,
+      });
+    } else {
+      // Electron: use IndexedDB
+      await db.bordereaux.add(newBordereau);
+      await logSyncOperation('CREATE', 'bordereau', bordereauId.replace('bordereau:', ''), newBordereau, user.id);
+    }
 
     onCreated(bordereauId);
   };

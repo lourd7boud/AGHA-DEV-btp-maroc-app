@@ -8,6 +8,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { createProjectFolders, generateProjectFolderPath } from '../services/fileSystemService';
 import { saveCompany, extractCompanyFromProject } from '../services/companyService';
 import CompanyAutocomplete from '../components/CompanyAutocomplete';
+import { isWeb } from '../utils/platform';
+import { apiService } from '../services/apiService';
+import { useCanModify } from '../hooks/useUnifiedData';
 
 const CreateProjectPage: FC = () => {
   const { t } = useTranslation();
@@ -15,6 +18,7 @@ const CreateProjectPage: FC = () => {
   const { user } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { canModify, reason: cannotModifyReason } = useCanModify();
 
   const [formData, setFormData] = useState({
     objet: '',
@@ -46,6 +50,11 @@ const CreateProjectPage: FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    
+    if (!canModify) {
+      setError(cannotModifyReason || 'Vous devez être connecté pour créer un projet');
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -57,6 +66,42 @@ const CreateProjectPage: FC = () => {
       // Générer le chemin du dossier projet
       const folderPath = generateProjectFolderPath(formData.annee, formData.marcheNo);
       
+      // 🌐 Web: Créer via API
+      if (isWeb()) {
+        const projectData = {
+          objet: formData.objet,
+          marcheNo: formData.marcheNo,
+          annee: formData.annee,
+          dateOuverture: formData.dateOuverture,
+          montant: 0,
+          typeMarche: formData.typeMarche,
+          commune: formData.commune || undefined,
+          societe: formData.societe,
+          rc: formData.rc,
+          cb: formData.cb,
+          cnss: formData.cnss,
+          patente: formData.patente,
+          programme: formData.programme,
+          projet: formData.projet,
+          ligne: formData.ligne,
+          chapitre: formData.chapitre,
+          delaisExecution: formData.delaisExecution ? parseInt(formData.delaisExecution) : undefined,
+          status: formData.status,
+          osc: formData.osc || undefined,
+          dateReceptionProvisoire: formData.dateReceptionProvisoire || undefined,
+          dateReceptionDefinitive: formData.dateReceptionDefinitive || undefined,
+          arrets: [],
+          progress: 0,
+          folderPath: folderPath,
+        };
+        
+        await apiService.createProject(projectData);
+        console.log('✅ [WEB] Projet créé via API');
+        navigate('/projects');
+        return;
+      }
+
+      // 🖥️ Electron: Créer localement avec sync
       // Créer la structure de dossiers pour le projet
       try {
         await createProjectFolders(formData.annee, formData.marcheNo);
@@ -453,11 +498,10 @@ const CreateProjectPage: FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Date d'ouverture *
+                Date d'ouverture
               </label>
               <input
                 type="date"
-                required
                 className="input"
                 value={formData.dateOuverture}
                 onChange={(e) => setFormData({ ...formData, dateOuverture: e.target.value })}
