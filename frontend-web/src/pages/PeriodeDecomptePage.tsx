@@ -117,13 +117,80 @@ const PeriodeDecomptePage: FC = () => {
     return pId === periodeId && !p.deletedAt;
   }), [serverPeriodes, periodeId]);
   
-  // Get metres for this specific periode
+  // 🔴 FIX: Get cumulative metres - for each bordereauLigneId, get the latest metre up to current periode
+  // This ensures the décompte shows cumulative quantities (Cumul) not just current period
   const metres = useMemo(() => {
-    return serverMetres?.filter(m => {
-      const mPeriodeId = m.periodeId?.includes(':') ? m.periodeId : `periode:${m.periodeId}`;
-      return mPeriodeId === periodeId && !m.deletedAt;
-    }) || [];
-  }, [serverMetres, periodeId]);
+    if (!serverMetres || !serverPeriodes || !periode) return [];
+    
+    // Get all periodes sorted by numero (order)
+    const sortedPeriodes = [...serverPeriodes]
+      .filter(p => !p.deletedAt)
+      .sort((a, b) => (a.numero || 0) - (b.numero || 0));
+    
+    // Find current periode index
+    const currentPeriodeIndex = sortedPeriodes.findIndex(p => {
+      const pId = p.id?.includes(':') ? p.id : `periode:${p.id}`;
+      return pId === periodeId;
+    });
+    
+    if (currentPeriodeIndex === -1) return [];
+    
+    // Get all periode IDs up to and including current
+    const relevantPeriodeIds = sortedPeriodes
+      .slice(0, currentPeriodeIndex + 1)
+      .map(p => p.id?.includes(':') ? p.id : `periode:${p.id}`);
+    
+    console.log('🔴 [DECOMPTE] Getting cumulative metres:', {
+      currentPeriode: periodeId,
+      currentPeriodeIndex,
+      relevantPeriodeIds,
+      totalMetres: serverMetres.length
+    });
+    
+    // For each bordereauLigneId, find the LATEST metre (highest periode numero) up to current
+    const metresByBordereauLigne: { [key: string]: any } = {};
+    
+    serverMetres
+      .filter(m => !m.deletedAt)
+      .forEach(m => {
+        const mPeriodeId = m.periodeId?.includes(':') ? m.periodeId : `periode:${m.periodeId}`;
+        
+        // Only consider metres from periodes up to current
+        if (!relevantPeriodeIds.includes(mPeriodeId)) return;
+        
+        const key = m.bordereauLigneId;
+        const existing = metresByBordereauLigne[key];
+        
+        if (!existing) {
+          metresByBordereauLigne[key] = m;
+        } else {
+          // Compare by periode numero to get the latest
+          const existingPeriode = sortedPeriodes.find(p => {
+            const pId = p.id?.includes(':') ? p.id : `periode:${p.id}`;
+            const ePId = existing.periodeId?.includes(':') ? existing.periodeId : `periode:${existing.periodeId}`;
+            return pId === ePId;
+          });
+          const mPeriode = sortedPeriodes.find(p => {
+            const pId = p.id?.includes(':') ? p.id : `periode:${p.id}`;
+            return pId === mPeriodeId;
+          });
+          
+          if (mPeriode && existingPeriode && (mPeriode.numero || 0) > (existingPeriode.numero || 0)) {
+            metresByBordereauLigne[key] = m;
+          }
+        }
+      });
+    
+    const result = Object.values(metresByBordereauLigne);
+    console.log('🔴 [DECOMPTE] Cumulative metres result:', result.map(m => ({
+      bordereauLigneId: m.bordereauLigneId,
+      periodeId: m.periodeId,
+      totalCumule: m.totalCumule,
+      totalPartiel: m.totalPartiel
+    })));
+    
+    return result;
+  }, [serverMetres, serverPeriodes, periodeId, periode]);
 
   // Get existing decompte for this periode
   const existingDecompte = useMemo(() => {
