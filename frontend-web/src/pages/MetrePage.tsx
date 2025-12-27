@@ -1,7 +1,7 @@
 import { FC, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { db, Metre, MetreSection, MetreSubSection } from '../db/database';
-import { useProject, useBordereaux, usePeriodes, useMetres } from '../hooks/useUnifiedData';
+import { useProject, useBordereaux, usePeriodes, useMetres, useDecompts } from '../hooks/useUnifiedData';
 import { isWeb } from '../utils/platform';
 import { apiService } from '../services/apiService';
 import { useAuthStore } from '../store/authStore';
@@ -33,6 +33,27 @@ import { logSyncOperation } from '../services/syncService';
 import { calculatePartiel, getCalculationType, type UniteType } from '../utils/metreCalculations';
 import { pullLatestData } from '../hooks/useSyncManager';
 import { useDirtyStateStore } from '../store/dirtyStateStore';
+
+// ============================================================
+// 🔒 FINANCE ENGINE - للحسابات المالية (Décompte)
+// ============================================================
+import {
+  calculateMontantHTInternal,
+  calculateTotalHTWithInternal,
+  calculateTVAWithInternal,
+  calculateTTCWithInternal,
+  toDecimal,
+  round2,
+  trunc2,
+  toNumber,
+  Decimal,
+} from '../utils/financeEngine';
+
+// 🔒 تقريب الكميات لرقمين - ROUND_HALF_UP
+// هذا الرقم المقرّب سيُستخدم في الديكونت
+const roundQuantity = (value: number): number => {
+  return Math.round(value * 100) / 100;
+};
 
 // ============== INTERFACES ==============
 
@@ -164,6 +185,7 @@ const MetrePage: FC = () => {
   const { bordereau, refresh: refreshBordereau } = useBordereaux(projectId);
   const { periodes: allPeriodes, refresh: refreshPeriodes } = usePeriodes(projectId);
   const { metres: allProjectMetres, refresh: refreshMetres } = useMetres(projectId);
+  const { decompts: allDecompts, refresh: refreshDecompts } = useDecompts(projectId);
 
   // الحصول على الـ periode الحالية من قائمة الفترات
   const currentPeriode = useMemo(() => {
@@ -171,6 +193,15 @@ const MetrePage: FC = () => {
     const rawPeriodeIdClean = periodeId.replace('periode:', '');
     return allPeriodes.find(p => p.id === periodeId || p.id === rawPeriodeIdClean);
   }, [periodeId, allPeriodes]);
+
+  // 🔴 الحصول على الـ Décompte الموجود لهذه الفترة
+  const existingDecompte = useMemo(() => {
+    if (!periodeId || !allDecompts) return undefined;
+    return allDecompts.find(d => {
+      const dPeriodeId = d.periodeId?.includes(':') ? d.periodeId : `periode:${d.periodeId}`;
+      return dPeriodeId === periodeId && !d.deletedAt;
+    });
+  }, [periodeId, allDecompts]);
 
   // تحميل التاريخ وخيار النهائي من الـ période
   useEffect(() => {
@@ -685,6 +716,264 @@ const MetrePage: FC = () => {
     );
   };
 
+  // ============================================================
+  // 🔴 DÉCOMPTE AUTO-SAVE: دالة حساب وحفظ الديكونت تلقائياً
+  // ============================================================
+  const saveDecompteAfterMetre = async (now: string) => {
+    if (!user || !projectId || !bordereau || !periodeId || !currentPeriode) {
+      console.log('⏭️ [DECOMPTE] Skipping - missing required data');
+      return;
+    }
+
+    console.log('🔴 [DECOMPTE AUTO-SAVE] Starting décompte calculation...');
+
+    try {
+      const rawProjectId = projectId.replace('project:', '');
+      const rawPeriodeId = periodeId.replace('periode:', '');
+      const cleanBordereauId = normalizeBordereauLigneId(bordereau.id);
+
+      // ============================================================
+      // 1. حساب الكميات التراكمية لكل سطر بوردرو (حتى الفترة الحالية)
+      // ============================================================
+      const sortedPeriodes = [...(allPeriodes || [])]
+        .filter(p => !p.deletedAt)
+        .sort((a, b) => (a.numero || 0) - (b.numero || 0));
+
+      const currentPeriodeIndex = sortedPeriodes.findIndex(p => {
+        const pId = p.id?.includes(':') ? p.id : `periode:${p.id}`;
+        return pId === periodeId;
+      });
+
+      if (currentPeriodeIndex === -1) {
+        console.log('⚠️ [DECOMPTE] Current periode not found in sorted list');
+        return;
+      }
+
+      // الفترات حتى الحالية (شاملة)
+      const relevantPeriodeIds = sortedPeriodes
+        .slice(0, currentPeriodeIndex + 1)
+        .map(p => p.id?.includes(':') ? p.id : `periode:${p.id}`);
+
+      // حساب الكميات التراكمية
+      const cumulativeQuantities = new Map<string, number>();
+      
+      // استخدام الميتري المحفوظ للتو (من metresQuick) + الميتري السابق
+      const allMetres = allProjectMetres || [];
+      
+      // أولاً: الميتري من الفترات السابقة
+      allMetres.filter(m => !m.deletedAt).forEach(m => {
+        const mPeriodeId = m.periodeId?.includes(':') ? m.periodeId : `periode:${m.periodeId}`;
+        
+        // فقط الفترات السابقة (ليس الحالية)
+        if (mPeriodeId === periodeId) return;
+        if (!relevantPeriodeIds.includes(mPeriodeId)) return;
+        
+        const key = m.bordereauLigneId;
+        let metreTotal = 0;
+        if (m.lignes && m.lignes.length > 0) {
+          metreTotal = m.lignes.reduce((sum: number, l: any) => sum + (Number(l.partiel) || 0), 0);
+        } else {
+          metreTotal = Number((m as any).totalPartiel) || 0;
+        }
+        
+        const currentSum = cumulativeQuantities.get(key) || 0;
+        cumulativeQuantities.set(key, currentSum + metreTotal);
+      });
+
+      // ثانياً: إضافة الميتري من الفترة الحالية (من metresQuick)
+      metresQuick.forEach(mq => {
+        const key = mq.bordereauLigneId;
+        const currentPeriodeLignes = mq.lignes.filter((l: any) => l.isFromPreviousPeriode !== true);
+        const totalCurrentPeriode = currentPeriodeLignes.reduce((sum: number, l: any) => sum + (Number(l.partiel) || 0), 0);
+        
+        const previousSum = cumulativeQuantities.get(key) || 0;
+        cumulativeQuantities.set(key, roundQuantity(previousSum + totalCurrentPeriode));
+      });
+
+      console.log('📊 [DECOMPTE] Cumulative quantities:', Object.fromEntries(cumulativeQuantities));
+
+      // ============================================================
+      // 2. إنشاء سطور الديكونت مع الحسابات المالية
+      // ============================================================
+      interface DecompteLigne {
+        prixNo: number;
+        designation: string;
+        unite: string;
+        quantiteBordereau: number;
+        quantiteRealisee: number;
+        prixUnitaireHT: number;
+        montantHT: number;
+        bordereauLigneId: string;
+      }
+
+      const decompteLines: DecompteLigne[] = bordereau.lignes.map((ligne: any) => {
+        const ligneId = `${cleanBordereauId}-ligne-${ligne.numero}`;
+        const quantiteRealisee = cumulativeQuantities.get(ligneId) || 0;
+        const prixUnitaireHT = ligne.prixUnitaire || 0;
+        const montantHTInternal = calculateMontantHTInternal(quantiteRealisee, prixUnitaireHT);
+        
+        return {
+          prixNo: ligne.numero,
+          designation: ligne.designation,
+          unite: ligne.unite,
+          quantiteBordereau: ligne.quantite,
+          quantiteRealisee,
+          prixUnitaireHT,
+          montantHT: toNumber(round2(montantHTInternal)),
+          bordereauLigneId: ligneId,
+        };
+      });
+
+      // ============================================================
+      // 3. حساب المجاميع المالية (Excel Compliance)
+      // ============================================================
+      const calculatedLignes = decompteLines.map(l => ({
+        ...l,
+        montantHTInternal: calculateMontantHTInternal(l.quantiteRealisee, l.prixUnitaireHT),
+      }));
+
+      const totalHTResult = calculateTotalHTWithInternal(calculatedLignes);
+      const totalHTInternal = totalHTResult.internal;
+      
+      const tauxTVA = currentPeriode.tauxTVA ?? 20;
+      const tvaResult = calculateTVAWithInternal(totalHTInternal, tauxTVA);
+      const montantTVA = tvaResult.display;
+      
+      // 🔒 EXCEL: TTC = HT_Internal + TVA_Display
+      const ttcResult = calculateTTCWithInternal(totalHTInternal, toDecimal(montantTVA));
+      const totalTTC = ttcResult.display;
+      const ttcInternal = ttcResult.internal;
+
+      // ============================================================
+      // 4. حساب Montant de l'acompte (مع Excel floating point)
+      // ============================================================
+      
+      // جلب مصاريف الفترات السابقة
+      const previousDecompts = (allDecompts || [])
+        .filter(d => !d.deletedAt && d.numero < currentPeriode.numero);
+      
+      let depensesExercicesAnterieurs = 0;
+      let decomptesPrecedents = 0;
+      const anneePeriodeActuelle = new Date(currentPeriode.dateDebut).getFullYear();
+      
+      for (const decompt of previousDecompts) {
+        const periodeDecompt = allPeriodes?.find(p => {
+          const pId = p.id?.includes(':') ? p.id : `periode:${p.id}`;
+          const dPId = decompt.periodeId?.includes(':') ? decompt.periodeId : `periode:${decompt.periodeId}`;
+          return pId === dPId;
+        });
+        if (!periodeDecompt) continue;
+        
+        const anneeDecompt = new Date(periodeDecompt.dateDebut).getFullYear();
+        const montantAPrendre = (decompt as any).montantTotal || 0;
+        
+        if (anneeDecompt < anneePeriodeActuelle) {
+          depensesExercicesAnterieurs += montantAPrendre;
+        } else if (anneeDecompt === anneePeriodeActuelle) {
+          decomptesPrecedents += montantAPrendre;
+        }
+      }
+
+      // حساب Retenue de Garantie: MIN(TRUNC(TTC×10%;2); TRUNC(Marché×7%;2))
+      let montantMarcheTTC = new Decimal(0);
+      for (const ligne of bordereau.lignes) {
+        const qte = toDecimal(ligne.quantite);
+        const pu = toDecimal(ligne.prixUnitaire);
+        const montantHT = qte.times(pu);
+        const montantTTC = montantHT.times(1.2);
+        montantMarcheTTC = montantMarcheTTC.plus(montantTTC);
+      }
+      
+      const retenue10Pourcent = trunc2(ttcInternal.times(0.10));
+      const retenue7Pourcent = trunc2(montantMarcheTTC.times(0.07));
+      const retenueGarantie = Decimal.min(retenue10Pourcent, retenue7Pourcent);
+      
+      // الحسابات النهائية
+      const restes = ttcInternal.minus(retenueGarantie);
+      const resteAPayer = restes.minus(toDecimal(depensesExercicesAnterieurs));
+      
+      // 🔒 EXCEL: floating point conversion للمونتان
+      const montantAcompteExact = resteAPayer.minus(toDecimal(decomptesPrecedents));
+      const montantAcompteFloat = montantAcompteExact.toNumber();
+      const montantAcompte = Number(montantAcompteFloat.toFixed(2));
+
+      console.log('💰 [DECOMPTE] Financial calculations:', {
+        totalTTC,
+        retenueGarantie: toNumber(retenueGarantie),
+        depensesExercicesAnterieurs,
+        decomptesPrecedents,
+        montantAcompte
+      });
+
+      // ============================================================
+      // 5. حفظ الديكونت
+      // ============================================================
+      const decompteData = {
+        projectId: rawProjectId,
+        periodeId: rawPeriodeId,
+        userId: user.id.replace('user:', ''),
+        numero: currentPeriode.numero,
+        lignes: decompteLines,
+        montantTotal: montantAcompte,
+        totalTTC: totalTTC,
+        statut: 'draft' as const,
+      };
+
+      if (isWeb()) {
+        if (existingDecompte) {
+          const rawDecomptId = existingDecompte.id.replace('decompt:', '');
+          await apiService.updateDecompt(rawDecomptId, decompteData);
+          console.log('✅ [WEB] Décompte updated:', rawDecomptId);
+        } else {
+          await apiService.createDecompt(decompteData);
+          console.log('✅ [WEB] Décompte created');
+        }
+      } else {
+        // Electron mode
+        if (existingDecompte) {
+          await db.decompts.update(existingDecompte.id, {
+            lignes: decompteLines,
+            montantTotal: montantAcompte,
+            totalTTC: totalTTC,
+            statut: 'draft',
+            updatedAt: now,
+          });
+          await logSyncOperation(
+            'UPDATE',
+            'decompt',
+            existingDecompte.id.replace('decompt:', ''),
+            { montantTotal: montantAcompte, totalTTC, lignesCount: decompteLines.length },
+            user.id
+          );
+          console.log('✅ [ELECTRON] Décompte updated');
+        } else {
+          const decomptId = `decompt:${uuidv4()}`;
+          const newDecompte = {
+            id: decomptId,
+            projectId: projectId,
+            periodeId: periodeId,
+            userId: user.id,
+            numero: currentPeriode.numero,
+            lignes: decompteLines,
+            montantTotal: montantAcompte,
+            totalTTC: totalTTC,
+            statut: 'draft' as const,
+            createdAt: now,
+            updatedAt: now,
+          };
+          await db.decompts.add(newDecompte);
+          await logSyncOperation('CREATE', 'decompt', decomptId.replace('decompt:', ''), newDecompte, user.id);
+          console.log('✅ [ELECTRON] Décompte created');
+        }
+      }
+
+      console.log('🎉 [DECOMPTE AUTO-SAVE] Completed successfully!');
+    } catch (error) {
+      console.error('❌ [DECOMPTE AUTO-SAVE] Error:', error);
+      // لا نلغي الحفظ الرئيسي، فقط نسجل الخطأ
+    }
+  };
+
   // ============== SAVE FUNCTION ==============
 
   const handleSaveAll = async () => {
@@ -723,15 +1012,17 @@ const MetrePage: FC = () => {
         console.log('  - Lignes data:', metreQuick.lignes.map(l => ({ id: l.id, partiel: l.partiel, isFromPrev: l.isFromPreviousPeriode })));
 
         // حساب المجموع الجزئي للفترة الحالية فقط
-        const totalPartielCurrentPeriode = currentPeriodeLignes.reduce(
-          (sum: number, ligne: any) => sum + (Number(ligne.partiel) || 0), 0
+        // ⚠️ تقريب المجموع لرقمين - هذا الرقم سيُستخدم في الديكونت
+        const totalPartielCurrentPeriode = roundQuantity(
+          currentPeriodeLignes.reduce((sum: number, ligne: any) => sum + (Number(ligne.partiel) || 0), 0)
         );
         
         // 🔴 FIX: حساب المجموع التراكمي الصحيح = الفترات السابقة + الفترة الحالية
         // cumulPrecedent يحتوي على مجموع كل الفترات السابقة
         // تأكد من أن كلا القيمتين أرقام
         const cumulPrecedent = Number(metreQuick.cumulPrecedent) || 0;
-        const totalCumule = cumulPrecedent + totalPartielCurrentPeriode;
+        // ⚠️ تقريب الكميلي أيضاً
+        const totalCumule = roundQuantity(cumulPrecedent + totalPartielCurrentPeriode);
         
         console.log('  💰 Totals:', {
           cumulPrecedent,
@@ -925,14 +1216,20 @@ const MetrePage: FC = () => {
         );
       }
 
+      // ============================================================
+      // 🔴 DÉCOMPTE AUTO-SAVE: حفظ الديكونت تلقائياً بعد حفظ الميتري
+      // ============================================================
+      await saveDecompteAfterMetre(now);
+
       // تنظيف dirty state بعد الحفظ الناجح
       markAsSaved();
       
       // Refresh data after save
       await refreshMetres();
       await refreshPeriodes();
+      await refreshDecompts();
       
-      alert('✅ Métrés enregistrés avec succès !');
+      alert('✅ Métrés et Décompte enregistrés avec succès !');
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
       alert('❌ Erreur lors de la sauvegarde des métrés');

@@ -5,6 +5,7 @@ import { useAuthStore } from '../../store/authStore';
 import { logSyncOperation } from '../../services/syncService';
 import { isWeb } from '../../utils/platform';
 import { apiService } from '../../services/apiService';
+import { calculateTVA, calculateTTC, formatMontant } from '../../utils/financeEngine';
 import {
   ArrowLeft,
   Plus,
@@ -102,10 +103,11 @@ const BordereauTable: FC<Props> = ({ bordereauId, onClose, onSaved }) => {
     }
   }, [bordereau]);
 
+  // 🔒 FINANCE ENGINE - حسابات مالية عبر financeEngine
   const calculateTotals = () => {
     const montantHT = lignes.reduce((sum, ligne) => sum + ligne.montant, 0);
-    const tva = montantHT * 0.2;
-    const montantTTC = montantHT + tva;
+    const tva = calculateTVA(montantHT, 20); // ⚠️ قطع TVA
+    const montantTTC = calculateTTC(montantHT, tva); // ⚠️ قطع TTC
     return { montantHT, tva, montantTTC };
   };
 
@@ -239,9 +241,9 @@ const BordereauTable: FC<Props> = ({ bordereauId, onClose, onSaved }) => {
     lignes.forEach((ligne) => {
       csv += `${ligne.numero},"${ligne.designation}",${ligne.unite},${ligne.quantite},${ligne.prixUnitaire},${ligne.montant}\n`;
     });
-    csv += `\n,,,Total HT:,,${montantHT.toFixed(2)}\n`;
-    csv += `,,,TVA 20%:,,${tva.toFixed(2)}\n`;
-    csv += `,,,Total TTC:,,${montantTTC.toFixed(2)}\n`;
+    csv += `\n,,,Total HT:,,${formatMontant(montantHT)}\n`;
+    csv += `,,,TVA 20%:,,${formatMontant(tva)}\n`;
+    csv += `,,,Total TTC:,,${formatMontant(montantTTC)}\n`;
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -440,20 +442,20 @@ const BordereauTable: FC<Props> = ({ bordereauId, onClose, onSaved }) => {
         </table>
       </div>
 
-      {/* Totals */}
+      {/* Totals - 🔒 financeEngine */}
       <div className="mt-6 pt-6 border-t">
         <div className="max-w-md ml-auto space-y-2">
           <div className="flex items-center justify-between text-gray-700">
             <span>Total HT:</span>
-            <span className="font-semibold">{montantHT.toFixed(2)} MAD</span>
+            <span className="font-semibold">{formatMontant(montantHT)} MAD</span>
           </div>
           <div className="flex items-center justify-between text-gray-700">
             <span>TVA 20%:</span>
-            <span className="font-semibold">{tva.toFixed(2)} MAD</span>
+            <span className="font-semibold">{formatMontant(tva)} MAD</span>
           </div>
           <div className="flex items-center justify-between text-lg font-bold text-gray-900 pt-2 border-t">
             <span>Total TTC:</span>
-            <span className="text-primary-600">{montantTTC.toFixed(2)} MAD</span>
+            <span className="text-primary-600">{formatMontant(montantTTC)} MAD</span>
           </div>
         </div>
       </div>

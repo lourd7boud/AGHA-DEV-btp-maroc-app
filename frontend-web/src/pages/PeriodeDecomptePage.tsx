@@ -19,36 +19,34 @@ import { v4 as uuidv4 } from 'uuid';
 import { logSyncOperation } from '../services/syncService';
 import { generateDecomptePDF } from '../utils/decomptePdfExport';
 import { useServerProjectDetails } from '../hooks/useServerData';
+import { isWeb } from '../utils/platform';
+import { apiService } from '../services/apiService';
 
 // ============================================================
-// FONCTIONS DE CALCUL COMPTABLE
+// 🔒 FINANCE ENGINE - المرجع الوحيد للحسابات المالية
 // ============================================================
-// التقريب العادي: لكل الحسابات (HT, TTC, الكميات...)
-// القطع: فقط لـ TVA (يقطع بعد رقمين من الفاصلة بدون تقريب)
+// ⚠️ كل الحسابات المالية تتم فقط عبر financeEngine
+// ⛔ ممنوع استخدام number أو Math مباشرة للحسابات المالية
 // ============================================================
+import {
+  calculateMontantHT,
+  calculateMontantHTInternal,
+  calculateTotalHTWithInternal,
+  calculateTVAWithInternal,
+  calculateTTCWithInternal,
+  formatMontant,
+  toDecimal,
+  round2,
+  trunc2,
+  toNumber,
+  Decimal,
+  type LigneDecompte as FinanceLigneDecompte,
+  type CalculatedLigne,
+} from '../utils/financeEngine';
 
-// دالة التقريب العادي - لكل الحسابات ما عدا TVA
-const arrondi2 = (value: number | undefined | null): number => {
-  const num = Number(value) || 0;
-  return Math.round(num * 100) / 100;
-};
-
-// Alias للتوافق
-const majoration = arrondi2;
-
-// دالة القطع - فقط لـ TVA
-// مثال: 164921.486 → 164921.48 (وليس 164921.49)
-const truncTVA = (value: number): number => {
-  return Math.trunc(value * 100) / 100;
-};
-
-// دالة الفورمات للعرض
-const formatMontant = (value: number | undefined | null): string => {
-  const num = Number(value) || 0;
-  return num.toLocaleString('fr-MA', { 
-    minimumFractionDigits: 2, 
-    maximumFractionDigits: 2 
-  });
+// Alias للتوافق مع الكود القديم (سيتم إزالته تدريجياً)
+const majoration = (value: number | undefined | null): number => {
+  return Number(value) || 0;
 };
 
 interface DecompteLigne {
@@ -117,10 +115,14 @@ const PeriodeDecomptePage: FC = () => {
     return pId === periodeId && !p.deletedAt;
   }), [serverPeriodes, periodeId]);
   
-  // 🔴 FIX: Get cumulative metres - for each bordereauLigneId, get the latest metre up to current periode
-  // This ensures the décompte shows cumulative quantities (Cumul) not just current period
-  const metres = useMemo(() => {
-    if (!serverMetres || !serverPeriodes || !periode) return [];
+  // ============================================================
+  // 🔴 FIX CUMUL: حساب الكميات التراكمية بشكل صحيح
+  // ============================================================
+  // المنطق: لكل سطر بوردرو، نجمع كل الـ partiels من كل الفترات حتى الفترة الحالية
+  // ============================================================
+  
+  const cumulativeQuantities = useMemo(() => {
+    if (!serverMetres || !serverPeriodes || !periode) return new Map<string, number>();
     
     // Get all periodes sorted by numero (order)
     const sortedPeriodes = [...serverPeriodes]
@@ -133,22 +135,22 @@ const PeriodeDecomptePage: FC = () => {
       return pId === periodeId;
     });
     
-    if (currentPeriodeIndex === -1) return [];
+    if (currentPeriodeIndex === -1) return new Map<string, number>();
     
     // Get all periode IDs up to and including current
     const relevantPeriodeIds = sortedPeriodes
       .slice(0, currentPeriodeIndex + 1)
       .map(p => p.id?.includes(':') ? p.id : `periode:${p.id}`);
     
-    console.log('🔴 [DECOMPTE] Getting cumulative metres:', {
+    console.log('🔴 [DECOMPTE CUMUL] Calculating cumulative quantities:', {
       currentPeriode: periodeId,
-      currentPeriodeIndex,
+      currentPeriodeNumero: periode.numero,
       relevantPeriodeIds,
       totalMetres: serverMetres.length
     });
     
-    // For each bordereauLigneId, find the LATEST metre (highest periode numero) up to current
-    const metresByBordereauLigne: { [key: string]: any } = {};
+    // For each bordereauLigneId, SUM all partiels from all relevant periodes
+    const quantitesByLigne = new Map<string, number>();
     
     serverMetres
       .filter(m => !m.deletedAt)
@@ -159,37 +161,31 @@ const PeriodeDecomptePage: FC = () => {
         if (!relevantPeriodeIds.includes(mPeriodeId)) return;
         
         const key = m.bordereauLigneId;
-        const existing = metresByBordereauLigne[key];
         
-        if (!existing) {
-          metresByBordereauLigne[key] = m;
+        // حساب مجموع الـ partiels من lignes
+        let metreTotal = 0;
+        if (m.lignes && m.lignes.length > 0) {
+          metreTotal = m.lignes.reduce((sum: number, l: any) => sum + (Number(l.partiel) || 0), 0);
         } else {
-          // Compare by periode numero to get the latest
-          const existingPeriode = sortedPeriodes.find(p => {
-            const pId = p.id?.includes(':') ? p.id : `periode:${p.id}`;
-            const ePId = existing.periodeId?.includes(':') ? existing.periodeId : `periode:${existing.periodeId}`;
-            return pId === ePId;
-          });
-          const mPeriode = sortedPeriodes.find(p => {
-            const pId = p.id?.includes(':') ? p.id : `periode:${p.id}`;
-            return pId === mPeriodeId;
-          });
-          
-          if (mPeriode && existingPeriode && (mPeriode.numero || 0) > (existingPeriode.numero || 0)) {
-            metresByBordereauLigne[key] = m;
-          }
+          metreTotal = Number(m.totalPartiel) || 0;
         }
+        
+        // إضافة للمجموع التراكمي
+        const currentSum = quantitesByLigne.get(key) || 0;
+        quantitesByLigne.set(key, currentSum + metreTotal);
+        
+        console.log(`  📊 [CUMUL] ${key}: +${metreTotal.toFixed(2)} (période ${mPeriodeId}) → total = ${(currentSum + metreTotal).toFixed(2)}`);
       });
     
-    const result = Object.values(metresByBordereauLigne);
-    console.log('🔴 [DECOMPTE] Cumulative metres result:', result.map(m => ({
-      bordereauLigneId: m.bordereauLigneId,
-      periodeId: m.periodeId,
-      totalCumule: m.totalCumule,
-      totalPartiel: m.totalPartiel
-    })));
+    // تقريب جميع القيم لرقمين
+    const roundedQuantities = new Map<string, number>();
+    quantitesByLigne.forEach((value, key) => {
+      roundedQuantities.set(key, Number(value.toFixed(2)));
+    });
     
-    return result;
+    console.log('🔴 [DECOMPTE CUMUL] Final cumulative quantities:', Object.fromEntries(roundedQuantities));
+    
+    return roundedQuantities;
   }, [serverMetres, serverPeriodes, periodeId, periode]);
 
   // Get existing decompte for this periode
@@ -204,12 +200,12 @@ const PeriodeDecomptePage: FC = () => {
     hasProject: !!project, 
     hasBordereau: !!bordereau, 
     hasPeriode: !!periode,
-    metresCount: metres.length,
+    cumulativeQuantitiesCount: cumulativeQuantities.size,
     serverMetresCount: serverMetres?.length,
     periodeId,
     serverLoading,
     serverError,
-    metres: metres.map(m => ({ id: m.id, periodeId: m.periodeId, bordereauLigneId: m.bordereauLigneId, totalCumule: m.totalCumule, totalPartiel: m.totalPartiel }))
+    cumulativeQuantities: Object.fromEntries(cumulativeQuantities)
   });
 
   // Charger les paramètres financiers depuis la période
@@ -223,25 +219,19 @@ const PeriodeDecomptePage: FC = () => {
   }, [periode]);
 
   // Calculer automatiquement les dépenses et acomptes des périodes précédentes
+  // 🔴 FIX: Use serverDecompts for Web mode instead of IndexedDB
   useEffect(() => {
     const calculatePreviousPayments = async () => {
       if (!periode || !projectId || !project) return;
 
-      // Use the correct projectId format for query
-      const queryProjectId = projectId.startsWith('project:') ? projectId : `project:${projectId}`;
-
-      // Récupérer tous les décomptes précédents de ce projet
-      const allDecomptes = await db.decompts
-        .where('projectId')
-        .equals(queryProjectId)
-        .and((d) => !d.deletedAt)
-        .toArray();
+      // 🔴 Use serverDecompts (from API) instead of db.decompts (IndexedDB)
+      const allDecomptes = serverDecompts?.filter(d => !d.deletedAt) || [];
 
       // Filter to get only previous décomptes (numero < current)
       const decomptesPrecedentsArray = allDecomptes.filter(d => d.numero < periode.numero);
 
       console.log('📊 Calculating previous payments:', {
-        queryProjectId,
+        projectId,
         currentPeriodeNumero: periode.numero,
         allDecomptesCount: allDecomptes.length,
         previousDecomptesCount: decomptesPrecedentsArray.length,
@@ -263,8 +253,12 @@ const PeriodeDecomptePage: FC = () => {
 
       // Parcourir tous les décomptes précédents
       for (const decompt of decomptesPrecedentsArray) {
-        // Récupérer la période du décompte pour connaître son année
-        const periodeDecompt = await db.periodes.get(decompt.periodeId);
+        // 🔴 FIX: Use serverPeriodes instead of db.periodes for Web mode
+        const periodeDecompt = serverPeriodes?.find(p => {
+          const pId = p.id?.includes(':') ? p.id : `periode:${p.id}`;
+          const dPId = decompt.periodeId?.includes(':') ? decompt.periodeId : `periode:${decompt.periodeId}`;
+          return pId === dPId;
+        });
         if (!periodeDecompt) {
           console.warn('⚠️ Période not found for décompte:', decompt.id);
           continue;
@@ -302,7 +296,7 @@ const PeriodeDecomptePage: FC = () => {
     };
 
     calculatePreviousPayments();
-  }, [periode, projectId, project]);
+  }, [periode, projectId, project, serverDecompts, serverPeriodes]);
 
   // Helper to normalize bordereauLigneId (remove prefix if present)
   const normalizeBordereauLigneId = (id: string): string => {
@@ -312,25 +306,22 @@ const PeriodeDecomptePage: FC = () => {
 
   // Charger les lignes du décompte - TOUJOURS mettre à jour les quantités depuis les métrés
   useEffect(() => {
-    // Générer les lignes depuis bordereau + metres (les métrés sont déjà cumulés)
-    if (bordereau && metres.length > 0) {
+    // ============================================================
+    // 🔴 CUMUL: استخدام الكميات التراكمية المحسوبة من كل الفترات
+    // ============================================================
+    if (bordereau && cumulativeQuantities.size > 0) {
       const cleanBordereauId = normalizeBordereauLigneId(bordereau.id);
       
       const decompteLines: DecompteLigne[] = bordereau.lignes.map((ligne: { numero: number; designation: string; unite: string; quantite: number; prixUnitaire?: number }) => {
         const ligneId = `${cleanBordereauId}-ligne-${ligne.numero}`;
         
-        // Trouver le métré correspondant (compare normalized IDs)
-        const metre = metres.find((m) => {
-          const metreLineId = normalizeBordereauLigneId(m.bordereauLigneId);
-          return metreLineId === ligneId;
-        });
-
-        // Les métrés sont déjà cumulés (copiés de la période précédente + ajouts)
-        // Use totalCumule for cumulative, or totalPartiel for current period
-        const quantiteRealisee = majoration(metre?.totalCumule || metre?.totalPartiel || 0);
-        const prixUnitaireHT = majoration(ligne.prixUnitaire || 0);
-        const montantHT = majoration(quantiteRealisee * prixUnitaireHT);
-
+        // 🔴 جلب الكمية التراكمية من Map (مجموع كل الفترات)
+        const quantiteRealisee = cumulativeQuantities.get(ligneId) || 0;
+        
+        console.log(`📊 [DECOMPTE LIGNE] Article ${ligne.numero}: cumul = ${quantiteRealisee}`);
+        
+        const prixUnitaireHT = ligne.prixUnitaire || 0;
+        
         return {
           prixNo: ligne.numero,
           designation: ligne.designation,
@@ -338,19 +329,18 @@ const PeriodeDecomptePage: FC = () => {
           quantiteBordereau: ligne.quantite,
           quantiteRealisee,
           prixUnitaireHT,
-          montantHT,
+          montantHT: 0, // سيُحسب في calculatedLignes via financeEngine
           bordereauLigneId: ligneId,
-          metreId: metre?.id,
         };
       });
 
       setLignes(decompteLines);
-    } else if (bordereau && metres.length === 0) {
+    } else if (bordereau && cumulativeQuantities.size === 0) {
       const cleanBordereauId = normalizeBordereauLigneId(bordereau.id);
       
       // إذا لم يكن هناك ميتري، عرض البوردرو فقط بكميات صفر
       const decompteLines: DecompteLigne[] = bordereau.lignes.map((ligne: { numero: number; designation: string; unite: string; quantite: number; prixUnitaire?: number }) => {
-        const prixUnitaireHT = majoration(ligne.prixUnitaire || 0);
+        const prixUnitaireHT = ligne.prixUnitaire || 0;
         return {
           prixNo: ligne.numero,
           designation: ligne.designation,
@@ -364,68 +354,146 @@ const PeriodeDecomptePage: FC = () => {
       });
       setLignes(decompteLines);
     }
-  }, [bordereau, metres]);
+  }, [bordereau, cumulativeQuantities]);
 
   // ============================================================
-  // CALCULS FINANCIERS
+  // CALCULS FINANCIERS - 🔒 VIA FINANCE ENGINE v2
   // ============================================================
-  // Total HT: تقريب عادي
-  const totalHT = arrondi2(lignes.reduce((sum, ligne) => sum + (Number(ligne.montantHT) || 0), 0));
-  // TVA: قطع فقط (بدون تقريب) - هذا إلزامي للتطبيقات الحكومية
-  const montantTVA = truncTVA(totalHT * (Number(tauxTVA) || 20) / 100);
-  // TTC: تقريب عادي
-  const totalTTC = arrondi2(totalHT + montantTVA);
+  // ⚠️ EXCEL COMPLIANCE: القيم الداخلية vs المعروضة
+  // ============================================================
+  
+  // تحويل lignes إلى الشكل المطلوب من financeEngine
+  const financeLignes: FinanceLigneDecompte[] = lignes.map(l => ({
+    prixNo: l.prixNo,
+    designation: l.designation,
+    unite: l.unite,
+    quantiteBordereau: l.quantiteBordereau,
+    quantiteRealisee: l.quantiteRealisee,  // ⚠️ هذه مخزنة مقربة من الميتري
+    prixUnitaireHT: l.prixUnitaireHT,
+  }));
+
+  // حساب montantHT لكل سطر مع الاحتفاظ بالقيمة الداخلية
+  const calculatedLignes: CalculatedLigne[] = financeLignes.map(l => ({
+    ...l,
+    montantHTInternal: calculateMontantHTInternal(l.quantiteRealisee, l.prixUnitaireHT),
+    montantHT: calculateMontantHT(l.quantiteRealisee, l.prixUnitaireHT),
+  }));
+
+  // ============================================================
+  // حساب المجاميع مع القيم الداخلية (EXCEL COMPLIANCE)
+  // ============================================================
+  const totalHTResult = calculateTotalHTWithInternal(calculatedLignes);
+  const totalHT = totalHTResult.display;
+  const totalHTInternal = totalHTResult.internal;
+  
+  const tvaResult = calculateTVAWithInternal(totalHTInternal, Number(tauxTVA) || 20);
+  const montantTVA = tvaResult.display;
+  const tvaInternal = tvaResult.internal;
+  
+  // 🔒 EXCEL: TTC = HT_Internal + TVA_Display (TRUNC)
+  // نمرر TVA المقطوعة كـ Decimal
+  const ttcResult = calculateTTCWithInternal(totalHTInternal, toDecimal(montantTVA));
+  const totalTTC = ttcResult.display;
+  const ttcInternal = ttcResult.internal;
   
   // Log للتحقق
-  console.log("[FINAL TOTALS]", { totalHT, montantTVA, totalTTC, tauxTVA });
+  console.log("[FINANCE ENGINE v2] Calculs:", {
+    totalHT_internal: totalHTInternal.toString(),
+    totalHT_display: totalHT,
+    tva_internal: tvaInternal.toString(),
+    tva_display: montantTVA,
+    ttc_internal: ttcInternal.toString(),
+    ttc_display: totalTTC
+  });
 
-  // Récapitulatif
+  // Récapitulatif - حساب بطريقة Excel
+  // 🔒 EXCEL: يعرض قيم مقربة لكنه يحسب بالقيم الداخلية الكاملة
   const getRecapCalculations = (): RecapCalculations => {
-    // Nouvelle logique basée sur isDecompteDernier
-    let travauxTermines = 0;
-    let travauxNonTermines = 0;
+    // ============================================================
+    // 🔒 EXCEL COMPLIANCE: نستخدم ttcInternal (القيمة الداخلية الكاملة)
+    // Excel يحسب بالقيم الداخلية ثم يعرض مقربة
+    // ============================================================
+    
+    const anterieurs = toDecimal(depensesExercicesAnterieurs);
+    const precedents = toDecimal(decomptesPrecedents);
+    
+    // 🔒 EXCEL: نستخدم القيمة الداخلية (الكاملة) للحسابات
+    const totalAvantRetenue = ttcInternal;
 
-    if (periode?.isDecompteDernier) {
-      // Décompte Dernier: tout va dans Travaux terminés
-      travauxTermines = totalTTC;
-      travauxNonTermines = 0;
-    } else {
-      // Décompte normal: tout va dans Travaux non terminés
-      travauxTermines = 0;
-      travauxNonTermines = totalTTC;
+    // ============================================================
+    // RETENUE DE GARANTIE: MIN(TRUNC(TTC×10%;2); TRUNC(Marché×7%;2))
+    // ============================================================
+    
+    // حساب مبلغ الصفقة الكلي TTC من البوردرو (بدقة كاملة)
+    let montantMarcheTTC = new Decimal(0);
+    if (bordereau?.lignes) {
+      for (const ligne of bordereau.lignes) {
+        const qte = toDecimal(ligne.quantite);
+        const pu = toDecimal(ligne.prixUnitaire);
+        const montantHT = qte.times(pu);
+        const montantTTC = montantHT.times(1.2);
+        montantMarcheTTC = montantMarcheTTC.plus(montantTTC);
+      }
     }
+    
+    // 🔒 TRUNC(TTC_INTERNAL × 10%, 2) - استخدام القيمة الداخلية
+    const retenue10Pourcent = trunc2(ttcInternal.times(0.10));
+    
+    // TRUNC(Marché × 7%, 2)
+    const retenue7Pourcent = trunc2(montantMarcheTTC.times(0.07));
+    
+    // MIN
+    const retenueGarantie = Decimal.min(retenue10Pourcent, retenue7Pourcent);
+    
+    console.log('[RETENUE] Calcul:', {
+      ttcInternal: ttcInternal.toString(),
+      montantMarcheTTC: montantMarcheTTC.toString(),
+      retenue10Pourcent: retenue10Pourcent.toString(),
+      retenue7Pourcent: retenue7Pourcent.toString(),
+      retenueGarantie: retenueGarantie.toString()
+    });
 
-    const approvisionnements = 0; // À implémenter si nécessaire
-
-    const totalAvantRetenue = totalTTC;
-
-    // RETENUE DE GARANTIE: MIN(10% du décompte TTC, 7% du montant total du marché)
-    // Formule Excel: =+MIN(TRUNC(I28*10%;2);TRUNC(K28*7%;2))
-    const montantMarcheTTC = majoration(bordereau?.lignes.reduce((sum: number, ligne: { quantite: number; prixUnitaire?: number }) => {
-      const montantHT = majoration(ligne.quantite * (ligne.prixUnitaire || 0));
-      return sum + majoration(montantHT * 1.2); // +20% TVA
-    }, 0) || 0);
-
-    const retenue10Pourcent = majoration(totalTTC * 0.10); // 10% du décompte
-    const retenue7Pourcent = majoration(montantMarcheTTC * 0.07); // 7% du marché
-    const retenueGarantie = majoration(Math.min(retenue10Pourcent, retenue7Pourcent));
-
-    // Calcul selon l'ordre Excel: TOTAUX - dépenses antérieurs = reste à payer
-    const totalRestes = majoration(totalAvantRetenue - retenueGarantie);
-    const resteAPayer = majoration(totalRestes - depensesExercicesAnterieurs);
-    const totalADeduire = majoration(depensesExercicesAnterieurs + decomptesPrecedents);
-    const montantAcompte = majoration(resteAPayer - decomptesPrecedents);
+    // ============================================================
+    // 🔒 EXCEL: حسابات بالقيم الداخلية (الكاملة)
+    // ============================================================
+    
+    // Restes = TTC_INTERNAL - Retenue (بدون تقريب وسيط)
+    const restes = totalAvantRetenue.minus(retenueGarantie);
+    
+    // Reste à payer = Restes - Exercices antérieurs
+    const resteAPayer = restes.minus(anterieurs);
+    
+    // Total à déduire
+    const totalADeduire = anterieurs.plus(precedents);
+    
+    // Montant de l'acompte = Reste à payer - Décomptes précédents
+    // 🔒 EXCEL: يستخدم floating point وليس Decimal
+    // لذلك نحول إلى Number قبل التقريب لمحاكاة Excel
+    const montantAcompteExact = resteAPayer.minus(precedents);
+    const montantAcompteFloat = montantAcompteExact.toNumber(); // Convert to floating point like Excel
+    const montantAcompte = toDecimal(montantAcompteFloat.toFixed(2)); // Round like Excel
+    
+    console.log('[RECAP v2] Calcul final:', {
+      ttcInternal: ttcInternal.toString(),
+      retenueGarantie: retenueGarantie.toString(),
+      restes: restes.toString(),
+      resteAPayer: resteAPayer.toString(),
+      precedents: precedents.toString(),
+      montantAcompteExact: montantAcompteExact.toString(),
+      montantAcompteFinal: montantAcompte.toString()
+    });
 
     return {
-      travauxTermines,
-      travauxNonTermines,
-      approvisionnements,
-      totalAvantRetenue,
-      retenueGarantie,
-      resteAPayer,
-      depensesExercicesAnterieurs,
-      totalADeduire,
-      montantAcompte,
+      // ⚠️ للعرض فقط: نستخدم totalTTC (display) وليس ttcInternal
+      travauxTermines: periode?.isDecompteDernier ? totalTTC : 0,
+      travauxNonTermines: periode?.isDecompteDernier ? 0 : totalTTC,
+      approvisionnements: 0,
+      totalAvantRetenue: totalTTC, // ⚠️ display للعرض في Montants
+      retenueGarantie: toNumber(retenueGarantie),
+      resteAPayer: toNumber(round2(restes)),
+      depensesExercicesAnterieurs: toNumber(round2(anterieurs)),
+      totalADeduire: toNumber(round2(totalADeduire)),
+      montantAcompte: toNumber(montantAcompte),
     };
   };
 
@@ -454,6 +522,7 @@ const PeriodeDecomptePage: FC = () => {
 
     autoUpdateDecompte();
   }, [lignes, recap.montantAcompte, existingDecompte, user, projectId, periodeId, periode]);
+  
   const handleSave = async () => {
     if (!user || !projectId || !periodeId || !periode) return;
 
@@ -461,66 +530,110 @@ const PeriodeDecomptePage: FC = () => {
 
     try {
       const now = new Date().toISOString();
+      const rawProjectId = cleanProjectId || projectId.replace('project:', '');
+      const rawPeriodeId = periodeId.replace('periode:', '');
 
-      // 1. Sauvegarder les paramètres financiers dans la période
-      await db.periodes.update(periodeId, {
-        tauxTVA,
-        tauxRetenue,
-        depensesExercicesAnterieurs,
-        decomptesPrecedents,
-        updatedAt: now,
-      });
+      if (isWeb()) {
+        // ============================================================
+        // 🌐 WEB MODE: استخدام API
+        // ============================================================
+        console.log('🌐 [WEB] Saving décompte via API...');
 
-      await logSyncOperation(
-        'UPDATE',
-        'periode',
-        periodeId.replace('periode:', ''),
-        { tauxTVA, tauxRetenue, depensesExercicesAnterieurs, decomptesPrecedents },
-        user.id
-      );
+        // 1. تحديث الفترة
+        await apiService.updatePeriode(rawPeriodeId, {
+          tauxTVA,
+          tauxRetenue,
+          depensesExercicesAnterieurs,
+          decomptesPrecedents,
+        });
+        console.log('✅ [WEB] Période updated');
 
-      // 2. Sauvegarder le décompte
-      if (existingDecompte) {
-        // Mettre à jour le décompte existant
-        await db.decompts.update(existingDecompte.id, {
+        // 2. حفظ أو تحديث الديكونت
+        const decompteData = {
+          projectId: rawProjectId,
+          periodeId: rawPeriodeId,
+          userId: user.id.replace('user:', ''),
+          numero: periode.numero,
           lignes: lignes,
           montantTotal: recap.montantAcompte,
-          totalTTC: totalTTC, // Total TTC avant retenues
+          totalTTC: totalTTC,
           statut: 'draft',
+        };
+
+        if (existingDecompte) {
+          const rawDecomptId = existingDecompte.id.replace('decompt:', '');
+          await apiService.updateDecompt(rawDecomptId, decompteData);
+          console.log('✅ [WEB] Décompte updated:', rawDecomptId);
+        } else {
+          await apiService.createDecompt(decompteData);
+          console.log('✅ [WEB] Décompte created');
+        }
+
+        // إعادة تحميل البيانات
+        refreshServerData();
+        
+      } else {
+        // ============================================================
+        // 🖥️ ELECTRON MODE: استخدام IndexedDB
+        // ============================================================
+        
+        // 1. Sauvegarder les paramètres financiers dans la période
+        await db.periodes.update(periodeId, {
+          tauxTVA,
+          tauxRetenue,
+          depensesExercicesAnterieurs,
+          decomptesPrecedents,
           updatedAt: now,
         });
 
         await logSyncOperation(
           'UPDATE',
-          'decompt',
-          existingDecompte.id.replace('decompt:', ''),
-          { montantTotal: recap.montantAcompte, lignesCount: lignes.length },
+          'periode',
+          rawPeriodeId,
+          { tauxTVA, tauxRetenue, depensesExercicesAnterieurs, decomptesPrecedents },
           user.id
         );
-      } else {
-        // Créer un nouveau décompte
-        const decomptId = `decompt:${uuidv4()}`;
 
-        const newDecompte = {
-          id: decomptId,
-          projectId: projectId,
-          periodeId: periodeId,
-          userId: user.id,
-          numero: periode.numero,
-          lignes: lignes,
-          montantTotal: recap.montantAcompte,
-          totalTTC: totalTTC, // Total TTC avant retenues
-          statut: 'draft' as const,
-          createdAt: now,
-          updatedAt: now,
-        };
+        // 2. Sauvegarder le décompte
+        if (existingDecompte) {
+          await db.decompts.update(existingDecompte.id, {
+            lignes: lignes,
+            montantTotal: recap.montantAcompte,
+            totalTTC: totalTTC,
+            statut: 'draft',
+            updatedAt: now,
+          });
 
-        await db.decompts.add(newDecompte);
-        await logSyncOperation('CREATE', 'decompt', decomptId.replace('decompt:', ''), newDecompte, user.id);
+          await logSyncOperation(
+            'UPDATE',
+            'decompt',
+            existingDecompte.id.replace('decompt:', ''),
+            { montantTotal: recap.montantAcompte, lignesCount: lignes.length },
+            user.id
+          );
+        } else {
+          const decomptId = `decompt:${uuidv4()}`;
+
+          const newDecompte = {
+            id: decomptId,
+            projectId: projectId,
+            periodeId: periodeId,
+            userId: user.id,
+            numero: periode.numero,
+            lignes: lignes,
+            montantTotal: recap.montantAcompte,
+            totalTTC: totalTTC,
+            statut: 'draft' as const,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          await db.decompts.add(newDecompte);
+          await logSyncOperation('CREATE', 'decompt', decomptId.replace('decompt:', ''), newDecompte, user.id);
+        }
       }
 
       alert('Décompte enregistré avec succès !');
-      // Stay on the same page - don't navigate away
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
       alert('Erreur lors de la sauvegarde du décompte');
@@ -863,8 +976,9 @@ const PeriodeDecomptePage: FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {lignes.map((ligne) => (
-                <tr key={ligne.bordereauLigneId} className="hover:bg-gray-50">
+              {/* ⚠️ استخدام calculatedLignes من financeEngine - وليس lignes */}
+              {calculatedLignes.map((ligne, index) => (
+                <tr key={lignes[index]?.bordereauLigneId || index} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-700 font-medium border-r border-gray-200">
                     {ligne.prixNo}
                   </td>

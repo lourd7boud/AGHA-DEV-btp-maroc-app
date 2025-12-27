@@ -13,6 +13,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2025-12-27
+
+### 🎯 Excel Compliance & Auto-Save Décompte
+
+This release establishes complete Excel-compatible financial calculations and adds automatic Décompte saving.
+
+### Added
+- **Auto-Save Décompte**: Décompte is now automatically calculated and saved when saving Métré
+  - No need to visit Décompte page separately
+  - All financial calculations happen in one save action
+  - Message changed to "Métrés et Décompte enregistrés avec succès !"
+
+### Fixed
+- **Récapitulation Display**: Now shows TTC display value (same as Total Général T.T.C) instead of internal value
+  - Display only change, no calculation impact
+  - Matches Excel visual behavior exactly
+
+### Changed
+- **financeEngine v2**: Complete separation of internal vs display values
+  - `internal` → Full precision for calculations
+  - `display` → Rounded values for UI
+  - TVA uses TRUNC (not ROUND)
+  - TTC uses ROUND
+  - Montant Acompte uses floating-point conversion (Excel compatibility)
+
+### Technical
+- Added `useDecompts` hook to MetrePage
+- Added `saveDecompteAfterMetre()` function with full financial calculation
+- All calculations go through `financeEngine.ts` exclusively
+
+### 🔒 Excel Compliance Rules (Locked)
+```
+TVA = TRUNC(HT × taux%, 2)
+TTC_Internal = HT_Internal + TVA_Display
+TTC_Display = ROUND(TTC_Internal, 2)
+Montant_Acompte = toNumber().toFixed(2) // Float conversion
+```
+
+---
+
 ## [Unreleased]
 
 ### Added

@@ -9,7 +9,6 @@ import {
   usePvs,
   useAttachments,
   usePeriodes,
-  useAggregatedMetres,
   useCanModify,
   useMetres,
 } from '../hooks/useUnifiedData';
@@ -101,7 +100,6 @@ const ProjectDetailPage: FC = () => {
   const { pvs: _pvs } = usePvs(rawId || null);
   const { attachments: _attachments } = useAttachments(rawId || null);
   const { periodes, refresh: refreshPeriodes } = usePeriodes(rawId || null);
-  const { aggregatedMetres } = useAggregatedMetres(rawId || null);
   const { metres } = useMetres(rawId || null);
 
   // 🔴 Load project assets (unified: photos, pv, documents)
@@ -139,22 +137,30 @@ const ProjectDetailPage: FC = () => {
       }, 0)
     : 0;
 
-  // حساب نسبة التقدم من آخر ديكونت
+  // حساب نسبة التقدم من الديكونت التراكمي (Cumul)
   const calculateProgress = () => {
     if (!decompts || decompts.length === 0 || montantTTC === 0) return 0;
     
-    // إيجاد آخر ديكونت (الأعلى رقماً)
+    // إيجاد آخر ديكونت (الأعلى رقماً) - يحتوي على القيم التراكمية
     const dernierDecompte = decompts.reduce((latest: any, d: any) => {
       if (!latest || d.numero > latest.numero) return d;
       return latest;
     }, decompts[0]);
     
-    // استخدام totalTTC إن وجد، وإلا montantTotal
-    const montantDecompte = dernierDecompte?.totalTTC || dernierDecompte?.montantTotal || dernierDecompte?.montantTTC || 0;
+    // استخدام totalTTC من آخر ديكونت (هذا هو القيمة التراكمية)
+    // لأن كل ديكونت يحتوي على مجموع كل الكميات من البداية
+    const montantCumulTTC = dernierDecompte?.totalTTC || dernierDecompte?.montantTotal || dernierDecompte?.montantTTC || 0;
     
-    // حساب النسبة
-    const progress = (montantDecompte / montantTTC) * 100;
-    return Math.min(100, Math.max(0, progress)); // بين 0 و 100
+    console.log('[PROGRESS] Calcul:', {
+      dernierDecompteNumero: dernierDecompte?.numero,
+      montantCumulTTC,
+      montantMarcheTTC: montantTTC,
+      progress: (montantCumulTTC / montantTTC) * 100
+    });
+    
+    // حساب النسبة: (TTC تراكمي / TTC الصفقة) × 100
+    const progress = (montantCumulTTC / montantTTC) * 100;
+    return progress; // يمكن أن تتجاوز 100% في حالة تجاوز الميزانية
   };
 
   const projectProgress = calculateProgress();
@@ -427,7 +433,14 @@ const ProjectDetailPage: FC = () => {
   const tabs = [
     { id: 'overview', label: 'Vue d\'ensemble', icon: FolderKanban, count: null },
     { id: 'bordereau', label: 'Bordereau', icon: FileText, count: bordereaux && bordereaux.length > 0 ? 1 : 0 },
-    { id: 'metre', label: 'Métré', icon: TrendingUp, count: aggregatedMetres?.length || 0 },
+    { id: 'metre', label: 'Métré', icon: TrendingUp, count: periodes?.filter((p: any) => {
+      // Compter les périodes qui ont des métrés
+      const cleanPId = (p.id || '').replace('periode:', '');
+      return metres?.some((m: any) => {
+        const cleanMPId = (m.periodeId || '').replace('periode:', '');
+        return cleanMPId === cleanPId;
+      });
+    }).length || 0 },
     { id: 'decompt', label: 'Décompte', icon: DollarSign, count: decompts?.length || 0 },
     { id: 'photos', label: 'Photos', icon: Image, count: projectPhotos.length },
     { id: 'pv', label: 'PV', icon: FileText, count: projectPVs.length },

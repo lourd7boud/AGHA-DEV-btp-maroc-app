@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Project, Bordereau, Periode } from '../db/database';
+import { formatMontant as financeFormatMontant } from './financeEngine';
 
 interface DecompteLigne {
   prixNo: number;
@@ -133,13 +134,9 @@ function numberToWords(num: number): string {
   return result;
 }
 
-// Helper function for consistent 2-decimal rounding (standard accounting rounding)
+// 🔒 FINANCE ENGINE - formatMontant from financeEngine
 function formatMontant(value: number): string {
-  const rounded = Math.round(value * 100) / 100;
-  return rounded.toLocaleString('fr-MA', { 
-    minimumFractionDigits: 2, 
-    maximumFractionDigits: 2 
-  });
+  return financeFormatMontant(value);
 }
 
 export async function generateDecomptePDF(

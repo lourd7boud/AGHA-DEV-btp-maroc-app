@@ -10,6 +10,11 @@ import {
   Download,
   TrendingUp,
 } from 'lucide-react';
+
+// 🔒 تقريب الكميات لرقمين - ROUND_HALF_UP
+const roundQuantity = (value: number): number => {
+  return Math.round(value * 100) / 100;
+};
 import { v4 as uuidv4 } from 'uuid';
 import { logSyncOperation } from '../../services/syncService';
 import {
@@ -60,7 +65,8 @@ const MetreTable: FC<MetreTableProps> = ({ metreId, onClose }) => {
     };
 
     const updatedLignes = [...metre.lignes, ligneToAdd];
-    const totalPartiel = updatedLignes.reduce((sum, l) => sum + l.partiel, 0);
+    // ⚠️ تقريب المجموع لرقمين - هذا الرقم سيُستخدم في الديكونت
+    const totalPartiel = roundQuantity(updatedLignes.reduce((sum, l) => sum + l.partiel, 0));
 
     // Récupérer tous les métrés de la même ligne de bordereau pour calculer le cumulé
     const allMetresForLigne = await db.metres
@@ -69,10 +75,12 @@ const MetreTable: FC<MetreTableProps> = ({ metreId, onClose }) => {
       .and((m) => !m.deletedAt)
       .toArray();
 
-    const totalCumule =
+    // ⚠️ تقريب الكميلي أيضاً
+    const totalCumule = roundQuantity(
       allMetresForLigne
         .filter((m) => m.id !== metreId)
-        .reduce((sum, m) => sum + m.totalCumule, 0) + totalPartiel;
+        .reduce((sum, m) => sum + m.totalCumule, 0) + totalPartiel
+    );
 
     const pourcentageRealisation = calculatePourcentage(totalCumule, metre.quantiteBordereau);
 
@@ -108,7 +116,8 @@ const MetreTable: FC<MetreTableProps> = ({ metreId, onClose }) => {
       return { ...updated, partiel };
     });
 
-    const totalPartiel = updatedLignes.reduce((sum, l) => sum + l.partiel, 0);
+    // ⚠️ تقريب المجموع لرقمين
+    const totalPartiel = roundQuantity(updatedLignes.reduce((sum, l) => sum + l.partiel, 0));
 
     const allMetresForLigne = await db.metres
       .where('bordereauLigneId')
@@ -116,10 +125,12 @@ const MetreTable: FC<MetreTableProps> = ({ metreId, onClose }) => {
       .and((m) => !m.deletedAt)
       .toArray();
 
-    const totalCumule =
+    // ⚠️ تقريب الكميلي أيضاً
+    const totalCumule = roundQuantity(
       allMetresForLigne
         .filter((m) => m.id !== metreId)
-        .reduce((sum, m) => sum + m.totalCumule, 0) + totalPartiel;
+        .reduce((sum, m) => sum + m.totalCumule, 0) + totalPartiel
+    );
 
     const pourcentageRealisation = calculatePourcentage(totalCumule, metre.quantiteBordereau);
 
@@ -141,7 +152,8 @@ const MetreTable: FC<MetreTableProps> = ({ metreId, onClose }) => {
     if (!confirm('Supprimer cette ligne ?')) return;
 
     const updatedLignes = metre.lignes.filter((l) => l.id !== ligneId);
-    const totalPartiel = updatedLignes.reduce((sum, l) => sum + l.partiel, 0);
+    // ⚠️ تقريب المجموع لرقمين
+    const totalPartiel = roundQuantity(updatedLignes.reduce((sum, l) => sum + l.partiel, 0));
 
     const allMetresForLigne = await db.metres
       .where('bordereauLigneId')
@@ -149,10 +161,12 @@ const MetreTable: FC<MetreTableProps> = ({ metreId, onClose }) => {
       .and((m) => !m.deletedAt)
       .toArray();
 
-    const totalCumule =
+    // ⚠️ تقريب الكميلي أيضاً
+    const totalCumule = roundQuantity(
       allMetresForLigne
         .filter((m) => m.id !== metreId)
-        .reduce((sum, m) => sum + m.totalCumule, 0) + totalPartiel;
+        .reduce((sum, m) => sum + m.totalCumule, 0) + totalPartiel
+    );
 
     const pourcentageRealisation = calculatePourcentage(totalCumule, metre.quantiteBordereau);
 
