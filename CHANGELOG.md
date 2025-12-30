@@ -13,6 +13,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.1] - 2025-12-30
+
+### 🔧 Infrastructure & Bug Fixes
+
+This patch release fixes file upload limits and PDF generation issues.
+
+### Fixed
+- **PDF Previous Décomptes Display**: Fixed issue where previous décomptes were not showing in PDF export
+  - Web mode now correctly uses `serverDecompts` instead of empty IndexedDB
+  - Previous décomptes now appear with correct dates and amounts in PDF header
+  
+### Changed
+- **File Upload Limits**: Increased limits for bulk photo uploads
+  - Nginx: 50MB → 500MB
+  - Express body-parser: 10mb → 500mb
+  - Multer: 50MB → 100MB per file, max 50 files at once
+  - Added `proxy_request_buffering off` for large uploads
+
+### Infrastructure
+- Fixed Docker backend database connections
+  - Production (`btp-backend`) → `btpdb`
+  - Development (`btp-backend-staging`) → `btpdb_staging`
+
+### 🔒 No Impact On
+- Financial calculations (financeEngine untouched)
+- Stored data (read-only changes)
+- Previous projects or approved décomptes
+
+---
+
 ## [1.1.0] - 2025-12-27
 
 ### 🎯 Excel Compliance & Auto-Save Décompte

@@ -50,8 +50,9 @@ app.use(cors({
 }));
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (message) => logger.info(message.trim()) } }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// 🔴 Large limits for bulk photo uploads (500MB)
+app.use(express.json({ limit: '500mb' }));
+app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
 // Ensure JSON responses for all API routes
 app.use(ensureJsonResponse);

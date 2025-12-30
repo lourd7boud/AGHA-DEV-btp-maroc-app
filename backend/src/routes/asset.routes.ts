@@ -33,7 +33,8 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB max
+    fileSize: 100 * 1024 * 1024, // 100MB max per file
+    files: 50, // Max 50 files at once
   },
   fileFilter: (req, file, cb) => {
     // Allow images, PDFs, and common document types
@@ -86,9 +87,9 @@ router.post('/project/:projectId/upload', upload.single('file'), uploadAsset);
 
 /**
  * POST /api/assets/project/:projectId/photos
- * Upload multiple photos at once
+ * Upload multiple photos at once (up to 50 photos)
  */
-router.post('/project/:projectId/photos', upload.array('files', 20), uploadMultiplePhotos);
+router.post('/project/:projectId/photos', upload.array('files', 50), uploadMultiplePhotos);
 
 /**
  * POST /api/assets/project/:projectId/pv

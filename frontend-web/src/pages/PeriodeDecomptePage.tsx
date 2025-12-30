@@ -653,37 +653,61 @@ const PeriodeDecomptePage: FC = () => {
       console.log('🔍 Project ID:', projectId);
       console.log('🔍 Période actuelle:', periode);
       
-      // Récupérer TOUS les décomptes du projet
-      const tousLesDecomptes = await db.decompts
-        .where('projectId')
-        .equals(`project:${projectId}`)
-        .toArray();
+      // 🔴 FIX: Use serverDecompts for Web mode, db.decompts for Electron
+      let decomptsPrecedentsAvecDates: { numero: number; date: string; montant: number; isDecompteDernier: boolean }[] = [];
       
-      console.log('🔍 TOUS les décomptes du projet:', tousLesDecomptes);
+      if (isWeb()) {
+        // Web mode: use serverDecompts
+        console.log('🌐 [WEB] Using serverDecompts:', serverDecompts?.length);
+        decomptsPrecedentsAvecDates = (serverDecompts || [])
+          .filter((d) => !d.deletedAt && d.numero < periode.numero)
+          .map((decompt) => {
+            const periodeDecompt = serverPeriodes?.find(
+              (p) => p.id === decompt.periodeId || 
+                     p.id === decompt.periodeId?.replace('periode:', '') ||
+                     `periode:${p.id}` === decompt.periodeId
+            );
+            return {
+              numero: decompt.numero,
+              date: periodeDecompt ? new Date(periodeDecompt.dateFin).toLocaleDateString('fr-FR') : '',
+              montant: (decompt as any).montantTotal || 0,
+              isDecompteDernier: periodeDecompt?.isDecompteDernier || false,
+            };
+          })
+          .sort((a, b) => a.numero - b.numero);
+      } else {
+        // Electron mode: use IndexedDB
+        const tousLesDecomptes = await db.decompts
+          .where('projectId')
+          .equals(`project:${projectId}`)
+          .toArray();
       
-      // Filtrer les décomptes précédents (sans deletedAt et numero < période actuelle)
-      const decomptesPrecedentsArray = tousLesDecomptes.filter(
-        (d) => !d.deletedAt && d.numero < periode.numero
-      );
+        console.log('🔍 TOUS les décomptes du projet:', tousLesDecomptes);
+      
+        // Filtrer les décomptes précédents (sans deletedAt et numero < période actuelle)
+        const decomptesPrecedentsArray = tousLesDecomptes.filter(
+          (d) => !d.deletedAt && d.numero < periode.numero
+        );
 
-      console.log('📊 Décomptes précédents filtrés:', decomptesPrecedentsArray);
+        console.log('📊 Décomptes précédents filtrés:', decomptesPrecedentsArray);
 
-      // Récupérer les périodes correspondantes pour avoir les dates
-      const decomptsPrecedentsAvecDates = await Promise.all(
-        decomptesPrecedentsArray.map(async (decompt) => {
-          const periodeDecompt = await db.periodes.get(decompt.periodeId);
-          console.log(`📅 Période du décompte ${decompt.numero}:`, periodeDecompt);
-          return {
-            numero: decompt.numero,
-            date: periodeDecompt ? new Date(periodeDecompt.dateFin).toLocaleDateString('fr-FR') : '',
-            montant: decompt.montantTotal,
-            isDecompteDernier: periodeDecompt?.isDecompteDernier || false,
-          };
-        })
-      );
+        // Récupérer les périodes correspondantes pour avoir les dates
+        decomptsPrecedentsAvecDates = await Promise.all(
+          decomptesPrecedentsArray.map(async (decompt) => {
+            const periodeDecompt = await db.periodes.get(decompt.periodeId);
+            console.log(`📅 Période du décompte ${decompt.numero}:`, periodeDecompt);
+            return {
+              numero: decompt.numero,
+              date: periodeDecompt ? new Date(periodeDecompt.dateFin).toLocaleDateString('fr-FR') : '',
+              montant: decompt.montantTotal,
+              isDecompteDernier: periodeDecompt?.isDecompteDernier || false,
+            };
+          })
+        );
 
-      // Trier par numéro
-      decomptsPrecedentsAvecDates.sort((a, b) => a.numero - b.numero);
+        // Trier par numéro
+        decomptsPrecedentsAvecDates.sort((a, b) => a.numero - b.numero);
+      }
 
       console.log('📊 Décomptes précédents avec dates (triés):', decomptsPrecedentsAvecDates);
 
