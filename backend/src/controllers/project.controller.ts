@@ -268,6 +268,8 @@ export const getProjectById = async (
       chapitre: row.chapitre,
       ordreService: row.ordre_service,
       delaisExecution: row.delais_execution,
+      assistanceTechnique: row.assistance_technique,
+      maitreOeuvre: row.maitre_oeuvre,
       osc: row.osc,
       arrets: row.arrets,
       dateReceptionProvisoire: row.date_reception_provisoire,
