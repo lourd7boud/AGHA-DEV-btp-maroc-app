@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useProject, useCanModify } from '../hooks/useUnifiedData';
 import { saveCompany, extractCompanyFromProject } from '../services/companyService';
 import CompanyAutocomplete from '../components/CompanyAutocomplete';
+import IntervenantAutocomplete from '../components/IntervenantAutocomplete';
 import { isWeb } from '../utils/platform';
 import { apiService } from '../services/apiService';
 import PriceRevisionFormulaEditor, { RevisionFormulaData } from '../components/project/PriceRevisionFormulaEditor';
@@ -579,33 +580,23 @@ const EditProjectPage: FC = () => {
             Intervenants du projet
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                L'ASSISTANCE TECHNIQUE
-              </label>
-              <input
-                type="text"
-                className="input"
-                value={formData.assistanceTechnique}
-                onChange={(e) => setFormData({ ...formData, assistanceTechnique: e.target.value })}
-                placeholder="Ex: Bureau d'études XYZ"
-              />
-              <p className="text-xs text-gray-500 mt-1">Bureau d'études ou assistance technique</p>
-            </div>
+            <IntervenantAutocomplete
+              type="assistanceTechnique"
+              value={formData.assistanceTechnique}
+              onChange={(value) => setFormData({ ...formData, assistanceTechnique: value })}
+              label="L'ASSISTANCE TECHNIQUE"
+              placeholder="Ex: Bureau d'études XYZ"
+              helpText="💡 Commencez à taper pour voir les suggestions"
+            />
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Le Maître d'Oeuvre
-              </label>
-              <input
-                type="text"
-                className="input"
-                value={formData.maitreOeuvre}
-                onChange={(e) => setFormData({ ...formData, maitreOeuvre: e.target.value })}
-                placeholder="Ex: DPA de Tata"
-              />
-              <p className="text-xs text-gray-500 mt-1">Responsable de la maîtrise d'oeuvre</p>
-            </div>
+            <IntervenantAutocomplete
+              type="maitreOeuvre"
+              value={formData.maitreOeuvre}
+              onChange={(value) => setFormData({ ...formData, maitreOeuvre: value })}
+              label="Le Maître d'Oeuvre"
+              placeholder="Ex: DPA de Tata"
+              helpText="💡 Commencez à taper pour voir les suggestions"
+            />
           </div>
         </div>
 
