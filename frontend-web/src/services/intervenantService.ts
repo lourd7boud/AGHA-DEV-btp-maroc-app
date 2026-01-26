@@ -31,7 +31,12 @@ const fetchIntervenants = async (): Promise<Intervenant[]> => {
   }
   
   try {
-    const projects = await apiService.getProjects();
+    const response = await apiService.getProjects();
+    // API returns { success: true, data: [...] }
+    const projects = response?.data || response || [];
+    
+    console.log('📋 Projets pour intervenants:', projects.length, 'projets');
+    
     const intervenantsMap = new Map<string, Intervenant>();
     
     for (const project of projects) {
