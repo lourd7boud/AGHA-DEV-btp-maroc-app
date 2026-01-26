@@ -31,6 +31,8 @@ const ProjectsPage: FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [yearFilter, setYearFilter] = useState<string>('all');
+  const [assistanceFilter, setAssistanceFilter] = useState<string>('all');
+  const [maitreOeuvreFilter, setMaitreOeuvreFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   // Server-first data loading
@@ -146,6 +148,16 @@ const ProjectsPage: FC = () => {
   // Obtenir les années uniques
   const uniqueYears = Array.from(new Set(projects?.map((p) => p.annee) || [])).sort().reverse();
 
+  // Obtenir les Assistance Technique uniques
+  const uniqueAssistance = Array.from(
+    new Set(projects?.map((p) => p.assistanceTechnique).filter(Boolean) || [])
+  ).sort();
+
+  // Obtenir les Maître d'Oeuvre uniques
+  const uniqueMaitreOeuvre = Array.from(
+    new Set(projects?.map((p) => p.maitreOeuvre).filter(Boolean) || [])
+  ).sort();
+
   // 🆕 استخراج الرقم الأول من رقم المشروع للترتيب (مثل 12/2025/DPA/TA -> 12)
   const extractFirstNumber = (marcheNo: string): number => {
     const match = marcheNo?.match(/^(\d+)/);
@@ -159,7 +171,9 @@ const ProjectsPage: FC = () => {
       p.societe?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
     const matchesYear = yearFilter === 'all' || p.annee === yearFilter;
-    return matchesSearch && matchesStatus && matchesYear;
+    const matchesAssistance = assistanceFilter === 'all' || p.assistanceTechnique === assistanceFilter;
+    const matchesMaitreOeuvre = maitreOeuvreFilter === 'all' || p.maitreOeuvre === maitreOeuvreFilter;
+    return matchesSearch && matchesStatus && matchesYear && matchesAssistance && matchesMaitreOeuvre;
   })?.sort((a, b) => {
     // 🆕 ترتيب تصاعدي حسب الرقم الأول من رقم المشروع (1, 3, 23...)
     return extractFirstNumber(a.marcheNo) - extractFirstNumber(b.marcheNo);
@@ -398,6 +412,40 @@ const ProjectsPage: FC = () => {
               </option>
             ))}
           </select>
+
+          {/* Filtre Assistance Technique */}
+          {uniqueAssistance.length > 0 && (
+            <select
+              className="input md:w-48"
+              value={assistanceFilter}
+              onChange={(e) => setAssistanceFilter(e.target.value)}
+              title="Filtrer par Assistance Technique"
+            >
+              <option value="all">Assistance Tech.</option>
+              {uniqueAssistance.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* Filtre Maître d'Oeuvre */}
+          {uniqueMaitreOeuvre.length > 0 && (
+            <select
+              className="input md:w-48"
+              value={maitreOeuvreFilter}
+              onChange={(e) => setMaitreOeuvreFilter(e.target.value)}
+              title="Filtrer par Maître d'Oeuvre"
+            >
+              <option value="all">Maître d'Oeuvre</option>
+              {uniqueMaitreOeuvre.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          )}
 
           <div className="flex gap-2">
             <button
