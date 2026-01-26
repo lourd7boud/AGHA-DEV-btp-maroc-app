@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useState } from 'react';
+import { OfflineBanner } from './NetworkStatusIndicator';
 
 interface LayoutProps {
   children: ReactNode;
@@ -168,8 +169,9 @@ const Layout: FC<LayoutProps> = ({ children }) => {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <div className="p-8">{children}</div>
+      <main className="flex-1 overflow-auto flex flex-col">
+        <OfflineBanner />
+        <div className="p-8 flex-1">{children}</div>
       </main>
     </div>
   );

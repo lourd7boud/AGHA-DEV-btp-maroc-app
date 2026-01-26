@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Project, Bordereau, Periode } from '../db/database';
 import { formatMontant as financeFormatMontant } from './financeEngine';
+import { savePDF, hasFileSystemAccess } from './desktopFileService';
 
 interface DecompteLigne {
   prixNo: number;
@@ -589,10 +590,23 @@ export async function generateDecomptePDF(
     } else {
       // إذا تم حظر النافذة المنبثقة، نحفظ الملف بدلاً من ذلك
       alert('Le navigateur a bloqué la fenêtre d\'impression. Le PDF sera téléchargé à la place.');
-      doc.save(fileName);
+      await saveWithDesktopSupport(doc, fileName);
     }
   } else {
     // حفظ PDF كملف
+    await saveWithDesktopSupport(doc, fileName);
+  }
+}
+
+// Helper function for desktop save support
+async function saveWithDesktopSupport(doc: jsPDF, fileName: string): Promise<void> {
+  if (hasFileSystemAccess()) {
+    const pdfData = doc.output('arraybuffer');
+    const result = await savePDF(new Uint8Array(pdfData), fileName);
+    if (!result.success && !result.canceled) {
+      doc.save(fileName);
+    }
+  } else {
     doc.save(fileName);
   }
 }

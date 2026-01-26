@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+release/
+
+# Renderer (auto-generated from frontend-web)
+renderer/*
+!renderer/.gitkeep
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Electron builder cache
+.cache/

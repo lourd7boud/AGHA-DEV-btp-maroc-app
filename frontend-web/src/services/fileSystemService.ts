@@ -340,11 +340,4 @@ export const exportToProjectFolder = async (
   return true;
 };
 
-// Type declarations for File System Access API
-declare global {
-  interface Window {
-    electronAPI?: {
-      openFolder: (path: string) => Promise<void>;
-    };
-  }
-}
+// Note: ElectronAPI types are declared in src/types/electron.d.ts

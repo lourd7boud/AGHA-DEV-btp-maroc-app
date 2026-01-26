@@ -1,0 +1,44 @@
+{
+  "name": "btp-desktop",
+  "version": "1.2.0",
+  "description": "BTP Application Desktop - Gestion des projets BTP",
+  "author": "MarocInfra",
+  "license": "MIT",
+  "main": "dist/main/index.js",
+  "homepage": "https://marocinfra.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marocinfra/btp-app-desktop"
+  },
+  "scripts": {
+    "dev": "npm run copy-web && concurrently \"npm run dev:main\" \"npm run dev:electron\"",
+    "dev:main": "vite build --watch --mode development",
+    "dev:electron": "wait-on dist/main/index.js && electron .",
+    "copy-web": "node scripts/copy-web-build.js",
+    "build": "npm run copy-web && vite build && electron-builder",
+    "build:win": "npm run build -- --win",
+    "build:mac": "npm run build -- --mac",
+    "build:linux": "npm run build -- --linux",
+    "build:all": "npm run build -- --win --mac --linux",
+    "pack": "electron-builder --dir",
+    "postinstall": "electron-builder install-app-deps",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "electron-updater": "^6.1.7",
+    "electron-log": "^5.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "concurrently": "^8.2.2",
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10",
+    "wait-on": "^7.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

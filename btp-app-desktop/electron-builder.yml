@@ -1,0 +1,86 @@
+appId: com.marocinfra.btp-desktop
+productName: BTP Desktop
+copyright: Copyright © 2026 MarocInfra
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - dist/**/*
+  - renderer/**/*
+  - "!**/*.map"
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+
+extraResources:
+  - from: resources/
+    to: resources/
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - ia32
+  icon: resources/icon.ico
+  artifactName: BTP-Desktop-${version}-Setup.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: BTP Desktop
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+  installerHeaderIcon: resources/icon.ico
+  license: LICENSE.md
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: resources/icon.icns
+  category: public.app-category.business
+  artifactName: BTP-Desktop-${version}-${arch}.${ext}
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  icon: resources/icons
+  category: Office
+  artifactName: BTP-Desktop-${version}-${arch}.${ext}
+  maintainer: support@marocinfra.com
+
+appImage:
+  license: LICENSE.md
+
+publish:
+  provider: github
+  owner: marocinfra
+  repo: btp-app-desktop
+  releaseType: release
+
+electronUpdaterCompatibility: ">=2.16"

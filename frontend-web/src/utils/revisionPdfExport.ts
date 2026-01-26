@@ -17,6 +17,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { savePDF, hasFileSystemAccess } from './desktopFileService';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -623,7 +624,17 @@ export async function generateRevisionPDF(
   // ═══════════════════════════════════════════════════════════════════════════
 
   const fileName = `Revision_Prix_${project.marcheNo?.replace(/\//g, '-') || 'projet'}.pdf`;
-  doc.save(fileName);
+  
+  // Use native save dialog in Electron, fallback to browser download
+  if (hasFileSystemAccess()) {
+    const pdfData = doc.output('arraybuffer');
+    const result = await savePDF(new Uint8Array(pdfData), fileName);
+    if (!result.success && !result.canceled) {
+      doc.save(fileName);
+    }
+  } else {
+    doc.save(fileName);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Project, Bordereau, MetreSection, MetreSubSection } from '../db/database';
+import { savePDF, hasFileSystemAccess } from './desktopFileService';
 
 // ============================================================
 // 📊 METRE PDF EXPORT - تصدير تفاصيل الميتري
@@ -545,5 +546,21 @@ export async function generateMetrePDF(
 
   // === حفظ الملف ===
   const fileName = `Metre_${project.marcheNo}_N${periode.numero}_${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(fileName);
+  
+  // Use native save dialog in Electron, browser download in Web
+  if (hasFileSystemAccess()) {
+    const pdfData = doc.output('arraybuffer');
+    const result = await savePDF(new Uint8Array(pdfData), fileName);
+    
+    if (!result.success && !result.canceled) {
+      console.error('[MetrePDF] Save failed:', result.error);
+      // Fallback to browser download
+      doc.save(fileName);
+    } else if (result.success) {
+      console.log('[MetrePDF] Saved to:', result.filePath);
+    }
+  } else {
+    // Web: Use browser download
+    doc.save(fileName);
+  }
 }
