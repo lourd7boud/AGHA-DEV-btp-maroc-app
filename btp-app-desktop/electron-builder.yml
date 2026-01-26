@@ -79,8 +79,8 @@ appImage:
 
 publish:
   provider: github
-  owner: marocinfra
-  repo: btp-app-desktop
+  owner: lourd7boud
+  repo: AGHA-DEV-btp-maroc-app
   releaseType: release
 
 electronUpdaterCompatibility: ">=2.16"
