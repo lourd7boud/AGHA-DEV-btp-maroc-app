@@ -15,9 +15,10 @@ import {
 import { isWeb } from '../utils/platform';
 import { apiService } from '../services/apiService';
 import { assetService, ProjectAsset } from '../services/assetService';
+import { getProjectConfig, ProjectRevisionConfig } from '../services/revisionService';
 import { db } from '../db/database';
 import { logSyncOperation } from '../services/syncService';
-import { PhotosTab, PVTab, DocumentsTab } from '../components/project';
+import { PhotosTab, PVTab, DocumentsTab, RevisionTab } from '../components/project';
 import {
   ArrowLeft,
   Edit2,
@@ -69,7 +70,7 @@ const safeFormatDate = (dateValue: string | undefined | null, formatStr: string,
   }
 };
 
-type TabType = 'overview' | 'bordereau' | 'periodes' | 'metre' | 'decompt' | 'photos' | 'pv' | 'documents';
+type TabType = 'overview' | 'bordereau' | 'periodes' | 'metre' | 'decompt' | 'revision' | 'photos' | 'pv' | 'documents';
 type CreateMode = 'blank' | 'template' | 'copy' | 'import' | null;
 
 const ProjectDetailPage: FC = () => {
@@ -87,6 +88,10 @@ const ProjectDetailPage: FC = () => {
   const [projectPVs, setProjectPVs] = useState<ProjectAsset[]>([]);
   const [projectDocuments, setProjectDocuments] = useState<ProjectAsset[]>([]);
   const [_assetsLoading, setAssetsLoading] = useState(false);
+
+  // 🔴 Revision config state
+  const [revisionConfig, setRevisionConfig] = useState<ProjectRevisionConfig | null>(null);
+  const [_revisionConfigLoading, setRevisionConfigLoading] = useState(false);
 
   // Support both formats: with "project:" prefix and without
   const projectId = id?.startsWith('project:') ? id : `project:${id}`;
@@ -128,6 +133,27 @@ const ProjectDetailPage: FC = () => {
     }
   }, [rawId]);
 
+  // 🔴 Load revision config
+  const loadRevisionConfig = async () => {
+    if (!rawId) return;
+    setRevisionConfigLoading(true);
+    try {
+      const config = await getProjectConfig(rawId);
+      console.log('[RevisionConfig] Loaded:', config);
+      setRevisionConfig(config);
+    } catch (error) {
+      console.error('Error loading revision config:', error);
+    } finally {
+      setRevisionConfigLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (rawId) {
+      loadRevisionConfig();
+    }
+  }, [rawId]);
+
   // Calculer le montant TTC depuis le bordereau
   const montantTTC = bordereaux && bordereaux.length > 0
     ? bordereaux[0].lignes.reduce((sum: number, ligne: any) => {
@@ -137,28 +163,31 @@ const ProjectDetailPage: FC = () => {
       }, 0)
     : 0;
 
-  // حساب نسبة التقدم من الديكونت التراكمي (Cumul)
+  // حساب نسبة التقدم من آخر ديكونت (تراكمي)
   const calculateProgress = () => {
     if (!decompts || decompts.length === 0 || montantTTC === 0) return 0;
     
-    // إيجاد آخر ديكونت (الأعلى رقماً) - يحتوي على القيم التراكمية
+    // 🔧 FIX: استخدام totalGeneralTtc من آخر ديكونت (لأن كل ديكونت تراكمي)
+    // إيجاد آخر ديكونت (الأعلى رقماً)
     const dernierDecompte = decompts.reduce((latest: any, d: any) => {
       if (!latest || d.numero > latest.numero) return d;
       return latest;
     }, decompts[0]);
     
-    // استخدام totalTTC من آخر ديكونت (هذا هو القيمة التراكمية)
-    // لأن كل ديكونت يحتوي على مجموع كل الكميات من البداية
-    const montantCumulTTC = dernierDecompte?.totalTTC || dernierDecompte?.montantTotal || dernierDecompte?.montantTTC || 0;
+    // 🔧 Backend يحول total_general_ttc إلى totalGeneralTtc (camelCase)
+    const montantCumulTTC = Number(dernierDecompte?.totalGeneralTtc || dernierDecompte?.totalTtc || 0);
     
-    console.log('[PROGRESS] Calcul:', {
+    console.log('[PROGRESS] Calcul (dernier décompte cumulatif):', {
+      nombreDecomptes: decompts.length,
       dernierDecompteNumero: dernierDecompte?.numero,
+      totalGeneralTtc: dernierDecompte?.totalGeneralTtc,
+      totalTtc: dernierDecompte?.totalTtc,
       montantCumulTTC,
       montantMarcheTTC: montantTTC,
       progress: (montantCumulTTC / montantTTC) * 100
     });
     
-    // حساب النسبة: (TTC تراكمي / TTC الصفقة) × 100
+    // حساب النسبة: (TTC تراكمي من آخر ديكونت / TTC الصفقة) × 100
     const progress = (montantCumulTTC / montantTTC) * 100;
     return progress; // يمكن أن تتجاوز 100% في حالة تجاوز الميزانية
   };
@@ -442,6 +471,7 @@ const ProjectDetailPage: FC = () => {
       });
     }).length || 0 },
     { id: 'decompt', label: 'Décompte', icon: DollarSign, count: decompts?.length || 0 },
+    { id: 'revision', label: 'Révision', icon: TrendingUp, count: null },
     { id: 'photos', label: 'Photos', icon: Image, count: projectPhotos.length },
     { id: 'pv', label: 'PV', icon: FileText, count: projectPVs.length },
     { id: 'documents', label: 'Documents', icon: Paperclip, count: projectDocuments.length },
@@ -1207,6 +1237,70 @@ const ProjectDetailPage: FC = () => {
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'revision' && (
+          <RevisionTab
+            project={{
+              id: rawId!,
+              marcheNo: project.marcheNo,
+              objet: project.objet,
+              societe: project.societe,
+              dateOuverture: project.dateOuverture,
+              osc: project.osc,
+              delaisExecution: project.delaisExecution
+            }}
+            decompts={(() => {
+              // Create a map of periodes for lookup
+              const periodesMap = new Map(periodes?.map((p: any) => [p.id, p]) || []);
+              
+              // Sort decompts by numero to calculate differences
+              const sortedDecompts = [...(decompts || [])].sort((a: any, b: any) => a.numero - b.numero);
+              
+              // Calculate Total Général HT for each decompt (from TTC / 1.2)
+              let previousTotalHT = 0;
+              
+              // Helper: round to 2 decimals (like the décompte does)
+              const round2 = (n: number) => Math.round(n * 100) / 100;
+              
+              return sortedDecompts.map((d: any) => {
+                const periode = periodesMap.get(d.periodeId);
+                
+                // Total Général HT = Total Général TTC / 1.2, rounded to 2 decimals
+                const totalGeneralTTC = d.totalGeneralTtc || d.total_general_ttc || d.totalTtc || d.total_ttc || 0;
+                const totalGeneralHT = round2(totalGeneralTTC / 1.2);
+                
+                // Montant à réviser = Total Général HT actuel - Total Général HT précédent
+                const montantAReviser = round2(totalGeneralHT - previousTotalHT);
+                
+                // Update previous for next iteration
+                previousTotalHT = totalGeneralHT;
+                
+                return {
+                  id: d.id,
+                  numero: d.numero,
+                  periodeId: d.periodeId,
+                  // Montant HT pour ce décompte (différence avec le précédent)
+                  montantHT: montantAReviser,
+                  totalGeneralHT: totalGeneralHT,
+                  statut: d.statut,
+                  // Use periode dates if decompt dates are missing
+                  dateDebut: d.dateDebut || d.date_debut || periode?.dateDebut || periode?.date_debut,
+                  dateFin: d.dateFin || d.date_fin || d.dateDecompte || d.date_decompte || periode?.dateFin || periode?.date_fin,
+                  createdAt: d.createdAt || d.created_at
+                };
+              }) || [];
+            })()}
+            periodes={periodes?.map((p: any) => ({
+              id: p.id,
+              numero: p.numero,
+              libelle: p.libelle,
+              dateDebut: p.dateDebut || p.date_debut,
+              dateFin: p.dateFin || p.date_fin,
+              statut: p.statut
+            })) || []}
+            revisionConfig={revisionConfig}
+          />
         )}
 
         {activeTab === 'photos' && (

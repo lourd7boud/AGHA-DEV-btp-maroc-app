@@ -34,6 +34,8 @@ import periodeRoutes from './routes/periode.routes';
 import syncRoutes from './routes/sync.routes';
 import assetRoutes from './routes/asset.routes';
 import healthRoutes from './routes/health.routes';
+import revisionRoutes from './routes/revision.routes';
+import indexManagementRoutes from './routes/indexManagement.routes';
 
 console.log('✅ All routes imported successfully');
 
@@ -82,6 +84,8 @@ app.use('/api/attachments', attachmentRoutes);
 app.use('/api/periodes', periodeRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/assets', assetRoutes);
+app.use('/api/revision', revisionRoutes);
+app.use('/api/index-management', indexManagementRoutes);
 
 // Error handling
 app.use(notFound);

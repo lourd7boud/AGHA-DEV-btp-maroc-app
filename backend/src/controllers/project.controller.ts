@@ -64,6 +64,8 @@ export const createProject = async (
       chapitre,
       delaisExecution,
       status,
+      assistanceTechnique,
+      maitreOeuvre,
       osc,
       dateReceptionProvisoire,
       dateReceptionDefinitive,
@@ -83,11 +85,11 @@ export const createProject = async (
         id, user_id, objet, marche_no, annee, date_ouverture, montant,
         type_marche, commune, societe, rc, cb, cnss, patente,
         programme, projet, ligne, chapitre, delais_execution,
-        status, osc, date_reception_provisoire, date_reception_definitive,
+        status, assistance_technique, maitre_oeuvre, osc, date_reception_provisoire, date_reception_definitive,
         progress, folder_path, created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-        $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, NOW(), NOW()
+        $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, NOW(), NOW()
       ) RETURNING *`,
       [
         projectId,
@@ -110,6 +112,8 @@ export const createProject = async (
         chapitre || null,
         delaisExecution ? parseInt(delaisExecution) : null,
         status || 'active',
+        assistanceTechnique || null,
+        maitreOeuvre || null,
         osc ? new Date(osc) : null,
         dateReceptionProvisoire ? new Date(dateReceptionProvisoire) : null,
         dateReceptionDefinitive ? new Date(dateReceptionDefinitive) : null,
@@ -184,6 +188,8 @@ export const getProjects = async (
       chapitre: row.chapitre,
       ordreService: row.ordre_service,
       delaisExecution: row.delais_execution,
+      assistanceTechnique: row.assistance_technique,
+      maitreOeuvre: row.maitre_oeuvre,
       osc: row.osc,
       arrets: row.arrets,
       dateReceptionProvisoire: row.date_reception_provisoire,
@@ -336,6 +342,8 @@ export const updateProject = async (
       osc,
       status,
       progress,
+      assistanceTechnique,
+      maitreOeuvre,
       dateReceptionProvisoire,
       dateReceptionDefinitive,
     } = req.body;
@@ -362,10 +370,12 @@ export const updateProject = async (
         osc = $18,
         status = COALESCE($19, status),
         progress = COALESCE($20, progress),
-        date_reception_provisoire = $21,
-        date_reception_definitive = $22,
+        assistance_technique = $21,
+        maitre_oeuvre = $22,
+        date_reception_provisoire = $23,
+        date_reception_definitive = $24,
         updated_at = NOW()
-      WHERE id = $23
+      WHERE id = $25
       RETURNING *`,
       [
         objet,
@@ -388,6 +398,8 @@ export const updateProject = async (
         osc ? new Date(osc) : null,
         status,
         progress !== undefined ? parseInt(progress) : null,
+        assistanceTechnique || null,
+        maitreOeuvre || null,
         dateReceptionProvisoire ? new Date(dateReceptionProvisoire) : null,
         dateReceptionDefinitive ? new Date(dateReceptionDefinitive) : null,
         id

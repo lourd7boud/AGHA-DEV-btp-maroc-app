@@ -11,6 +11,7 @@ import CompanyAutocomplete from '../components/CompanyAutocomplete';
 import { isWeb } from '../utils/platform';
 import { apiService } from '../services/apiService';
 import { useCanModify } from '../hooks/useUnifiedData';
+import PriceRevisionFormulaEditor, { RevisionFormulaData } from '../components/project/PriceRevisionFormulaEditor';
 
 const CreateProjectPage: FC = () => {
   const { t } = useTranslation();
@@ -19,6 +20,7 @@ const CreateProjectPage: FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { canModify, reason: cannotModifyReason } = useCanModify();
+  const [revisionFormula, setRevisionFormula] = useState<RevisionFormulaData | null>(null);
 
   const [formData, setFormData] = useState({
     objet: '',
@@ -40,6 +42,9 @@ const CreateProjectPage: FC = () => {
     chapitre: '',
     delaisExecution: '',
     status: 'draft' as const,
+    // Intervenants du projet
+    assistanceTechnique: '',
+    maitreOeuvre: '',
     // Gestion des délais
     osc: '', // Ordre de Service de Commencement (date début travaux)
     achevementTravaux: '', // Date achèvement travaux
@@ -87,16 +92,48 @@ const CreateProjectPage: FC = () => {
           chapitre: formData.chapitre,
           delaisExecution: formData.delaisExecution ? parseInt(formData.delaisExecution) : undefined,
           status: formData.status,
+          assistanceTechnique: formData.assistanceTechnique || undefined,
+          maitreOeuvre: formData.maitreOeuvre || undefined,
           osc: formData.osc || undefined,
           dateReceptionProvisoire: formData.dateReceptionProvisoire || undefined,
           dateReceptionDefinitive: formData.dateReceptionDefinitive || undefined,
           arrets: [],
           progress: 0,
           folderPath: folderPath,
+          // Formule de révision des prix
+          revisionFormula: revisionFormula ? {
+            name: revisionFormula.name,
+            fixedPart: revisionFormula.fixedPart,
+            weights: revisionFormula.weights.reduce((acc, w) => {
+              acc[w.indexCode] = w.weight;
+              return acc;
+            }, {} as Record<string, number>)
+          } : undefined,
         };
         
-        await apiService.createProject(projectData);
+        const response = await apiService.createProject(projectData);
         console.log('✅ [WEB] Projet créé via API');
+        
+        // Si formule définie, créer la config de révision
+        if (revisionFormula && response?.id) {
+          try {
+            await apiService.post(`/projects/${response.id}/revision-config`, {
+              formula: {
+                name: revisionFormula.name,
+                fixedPart: revisionFormula.fixedPart,
+                weights: revisionFormula.weights.reduce((acc, w) => {
+                  acc[w.indexCode] = w.weight;
+                  return acc;
+                }, {} as Record<string, number>)
+              },
+              baseDate: formData.dateOuverture
+            });
+            console.log('✅ [WEB] Config révision créée');
+          } catch (revErr) {
+            console.warn('⚠️ Erreur création config révision:', revErr);
+          }
+        }
+        
         navigate('/projects');
         return;
       }
@@ -133,6 +170,9 @@ const CreateProjectPage: FC = () => {
         chapitre: formData.chapitre,
         delaisExecution: formData.delaisExecution ? parseInt(formData.delaisExecution) : undefined,
         status: formData.status,
+        // Intervenants du projet
+        assistanceTechnique: formData.assistanceTechnique || undefined,
+        maitreOeuvre: formData.maitreOeuvre || undefined,
         // Gestion des délais
         osc: formData.osc || undefined,
         dateReceptionProvisoire: formData.dateReceptionProvisoire || undefined,
@@ -490,6 +530,42 @@ const CreateProjectPage: FC = () => {
           </div>
         </div>
 
+        {/* Intervenants du projet */}
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Intervenants du projet
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                L'ASSISTANCE TECHNIQUE
+              </label>
+              <input
+                type="text"
+                className="input"
+                value={formData.assistanceTechnique}
+                onChange={(e) => setFormData({ ...formData, assistanceTechnique: e.target.value })}
+                placeholder="Ex: Bureau d'études XYZ"
+              />
+              <p className="text-xs text-gray-500 mt-1">Bureau d'études ou assistance technique</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Le Maître d'Oeuvre
+              </label>
+              <input
+                type="text"
+                className="input"
+                value={formData.maitreOeuvre}
+                onChange={(e) => setFormData({ ...formData, maitreOeuvre: e.target.value })}
+                placeholder="Ex: DPA de Tata"
+              />
+              <p className="text-xs text-gray-500 mt-1">Responsable de la maîtrise d'oeuvre</p>
+            </div>
+          </div>
+        </div>
+
         {/* Gestion des délais */}
         <div>
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
@@ -537,6 +613,24 @@ const CreateProjectPage: FC = () => {
               <p className="text-xs text-gray-500 mt-1">Ordre de Service de Commencement</p>
             </div>
           </div>
+        </div>
+
+        {/* Formule de Révision des Prix */}
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Révision des Prix
+          </h2>
+          <PriceRevisionFormulaEditor
+            value={revisionFormula}
+            onChange={setRevisionFormula}
+            dateOuverture={formData.dateOuverture}
+          />
+          {revisionFormula && (
+            <p className="text-xs text-gray-500 mt-2">
+              Les index de base (X₀) seront automatiquement récupérés depuis le mois de la date d'ouverture.
+              Les calculs de révision seront appliqués automatiquement dans chaque décompte.
+            </p>
+          )}
         </div>
 
         {/* Actions */}

@@ -107,3 +107,8 @@ CREATE INDEX IF NOT EXISTS idx_metres_bordereau_ligne_id ON metres(bordereau_lig
 COMMENT ON COLUMN metres.sections IS 'JSON array of MetreSection objects (Douar/Lieu)';
 COMMENT ON COLUMN metres.sub_sections IS 'JSON array of MetreSubSection objects (Element: semeille, radier, etc.)';
 COMMENT ON COLUMN metres.lignes IS 'JSON array of MetreLigne objects (actual measurements)';
+-- ============================================================
+-- Migration 4: Add total_general_ttc to decompts
+-- ============================================================
+ALTER TABLE decompts ADD COLUMN IF NOT EXISTS total_general_ttc DECIMAL(15, 2);
+COMMENT ON COLUMN decompts.total_general_ttc IS 'Total Général (T.T.C) - المبلغ التراكمي الكلي';

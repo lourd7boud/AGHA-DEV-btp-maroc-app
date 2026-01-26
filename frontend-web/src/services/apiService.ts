@@ -433,7 +433,7 @@ class ApiService {
    * Get unique companies from all existing projects
    * Used for autocomplete suggestions
    */
-  async getCompanies(): Promise<{ nom: string; rc?: string; cnss?: string }[]> {
+  async getCompanies(): Promise<{ nom: string; rc?: string; cb?: string; cnss?: string; patente?: string }[]> {
     try {
       const response = await this.getProjects();
       
@@ -441,7 +441,7 @@ class ApiService {
       const projects = response?.data || response || [];
       
       // Extract unique companies from projects
-      const companiesMap = new Map<string, { nom: string; rc?: string; cnss?: string }>();
+      const companiesMap = new Map<string, { nom: string; rc?: string; cb?: string; cnss?: string; patente?: string }>();
       
       if (Array.isArray(projects)) {
         for (const project of projects) {
@@ -452,7 +452,9 @@ class ApiService {
               companiesMap.set(key, {
                 nom: societe.trim(),
                 rc: project.rc || '',
-                cnss: project.cnss || ''
+                cb: project.cb || '',           // 🔴 FIX: Ajout cb
+                cnss: project.cnss || '',
+                patente: project.patente || ''  // 🔴 FIX: Ajout patente
               });
             }
           }
@@ -517,6 +519,16 @@ class ApiService {
           onProgress(progress);
         }
       },
+    });
+    return response.data;
+  }
+
+  /**
+   * GET request that returns a blob (for file downloads)
+   */
+  async getBlob(url: string): Promise<Blob> {
+    const response = await this.client.get(url, {
+      responseType: 'blob'
     });
     return response.data;
   }

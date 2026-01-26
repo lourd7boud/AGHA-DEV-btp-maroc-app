@@ -562,3 +562,104 @@ export const debugCalculation = (
   
   console.log('='.repeat(60));
 };
+
+// ============================================================
+// 📊 RÉVISION DES PRIX - Phase 3
+// ============================================================
+// ⚠️ EXCEL COMPLIANCE:
+// - Montant à réviser = HT de la période (non cumulatif)
+// - Coefficient = calculé par priceRevisionEngine
+// - Montant révision = TRUNC(Montant × Coefficient, 2)
+// ============================================================
+
+/**
+ * Structure pour le calcul de révision
+ */
+export interface RevisionInput {
+  /** HT de la période (non cumulatif) - la base à réviser */
+  montantHTInternal: Decimal;
+  /** Coefficient de révision (ex: 0.0177) */
+  coefficient: number;
+}
+
+export interface RevisionResult {
+  /** Montant de la révision (display) */
+  montantRevision: number;
+  /** Montant de la révision (internal) */
+  montantRevisionInternal: Decimal;
+  /** Nouveau Total HT après révision (display) */
+  nouveauTotalHT: number;
+  /** Nouveau Total HT après révision (internal) */
+  nouveauTotalHTInternal: Decimal;
+}
+
+/**
+ * 🔒 EXCEL: Calcule le montant de la révision des prix
+ * 
+ * Formule: Montant Révision = TRUNC(HT × Coefficient, 2)
+ * 
+ * @param input - Montant HT et coefficient
+ * @returns Montant de révision et nouveau total HT
+ */
+export const calculateRevisionAmount = (input: RevisionInput): RevisionResult => {
+  const { montantHTInternal, coefficient } = input;
+  
+  // 🔒 EXCEL: Calcul avec précision complète
+  const coef = toDecimal(coefficient);
+  const montantRevisionInternal = montantHTInternal.times(coef);
+  
+  // 🔒 EXCEL: TRUNC pour l'affichage
+  const montantRevision = toNumber(trunc2(montantRevisionInternal));
+  
+  // Nouveau Total HT = HT + Révision (avec internal)
+  const nouveauTotalHTInternal = montantHTInternal.plus(montantRevisionInternal);
+  const nouveauTotalHT = toNumber(round2(nouveauTotalHTInternal));
+  
+  console.log('[REVISION] Calcul:', {
+    montantHT: montantHTInternal.toString(),
+    coefficient: coef.toString(),
+    revisionInternal: montantRevisionInternal.toString(),
+    revisionDisplay: montantRevision,
+    nouveauTotalInternal: nouveauTotalHTInternal.toString(),
+    nouveauTotalDisplay: nouveauTotalHT,
+  });
+  
+  return {
+    montantRevision,
+    montantRevisionInternal,
+    nouveauTotalHT,
+    nouveauTotalHTInternal,
+  };
+};
+
+/**
+ * 🔒 EXCEL: Calcule TVA et TTC après révision
+ * 
+ * @param nouveauTotalHTInternal - Total HT après révision (internal)
+ * @param tauxTVA - Taux de TVA (ex: 20)
+ */
+export const calculateTVATTCAfterRevision = (
+  nouveauTotalHTInternal: Decimal,
+  tauxTVA: number = 20
+): {
+  montantTVA: number;
+  tvaInternal: Decimal;
+  totalTTC: number;
+  ttcInternal: Decimal;
+} => {
+  // 🔒 EXCEL: TVA = TRUNC(Nouveau HT × taux%, 2)
+  const tvaResult = calculateTVAWithInternal(nouveauTotalHTInternal, tauxTVA);
+  
+  // 🔒 EXCEL: TTC = Nouveau HT + TVA_Display
+  const ttcResult = calculateTTCWithInternal(
+    nouveauTotalHTInternal, 
+    toDecimal(tvaResult.display)
+  );
+  
+  return {
+    montantTVA: tvaResult.display,
+    tvaInternal: tvaResult.internal,
+    totalTTC: ttcResult.display,
+    ttcInternal: ttcResult.internal,
+  };
+};

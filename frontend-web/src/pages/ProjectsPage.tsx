@@ -43,6 +43,8 @@ const ProjectsPage: FC = () => {
 
   // 🌐 Web: تحميل bordereaux من API لكل المشاريع
   const [bordereaux, setBordereaux] = useState<any[]>([]);
+  // 🆕 تحميل decompts لحساب Avancement
+  const [decompts, setDecompts] = useState<any[]>([]);
   
   useEffect(() => {
     const loadBordereaux = async () => {
@@ -70,6 +72,33 @@ const ProjectsPage: FC = () => {
     loadBordereaux();
   }, [projects]);
 
+  // 🆕 تحميل decompts لكل المشاريع
+  useEffect(() => {
+    const loadDecompts = async () => {
+      if (!projects?.length) {
+        setDecompts([]);
+        return;
+      }
+      
+      const allDecompts: any[] = [];
+      
+      await Promise.all(projects.map(async (project) => {
+        const cleanId = project.id?.replace('project:', '') || project.id;
+        try {
+          const res = await apiService.getDecompts(cleanId);
+          const data = res.data || res;
+          if (Array.isArray(data)) {
+            allDecompts.push(...data.map(d => ({ ...d, projectId: project.id })));
+          }
+        } catch (e) { /* No decompts */ }
+      }));
+      
+      setDecompts(allDecompts.filter(d => !d.deletedAt));
+    };
+    
+    loadDecompts();
+  }, [projects]);
+
   // Helper pour calculer le montant TTC d'un projet
   const getProjectMontantTTC = (projectId: string): number => {
     if (!bordereaux?.length) return 0;
@@ -84,6 +113,36 @@ const ProjectsPage: FC = () => {
     return montantHT * 1.2; // +20% TVA
   };
 
+  // 🆕 Helper pour calculer l'avancement d'un projet (من آخر ديكونت)
+  const getProjectProgress = (projectId: string): number => {
+    const montantTTC = getProjectMontantTTC(projectId);
+    if (montantTTC === 0) return 0;
+    
+    // تطبيع المعرفات للمقارنة
+    const cleanProjectId = projectId?.replace('project:', '') || projectId;
+    
+    // إيجاد ديكونتات هذا المشروع
+    const projectDecompts = decompts.filter((d) => {
+      const dProjectId = (d.projectId || d.project_id)?.replace('project:', '') || d.projectId;
+      return dProjectId === cleanProjectId || d.projectId === projectId;
+    });
+    
+    if (projectDecompts.length === 0) return 0;
+    
+    // إيجاد آخر ديكونت (الأعلى رقماً)
+    const dernierDecompte = projectDecompts.reduce((latest: any, d: any) => {
+      if (!latest || d.numero > latest.numero) return d;
+      return latest;
+    }, projectDecompts[0]);
+    
+    // استخدام totalGeneralTtc أو totalTtc (camelCase من Backend)
+    const totalGeneralTTC = Number(dernierDecompte?.totalGeneralTtc || dernierDecompte?.totalTtc || 0);
+    
+    if (totalGeneralTTC === 0) return 0;
+    
+    const progress = (totalGeneralTTC / montantTTC) * 100;
+    return Math.min(Math.round(progress * 10) / 10, 100); // تقريب لرقم واحد بعد الفاصلة، حد أقصى 100%
+  };
   // Obtenir les années uniques
   const uniqueYears = Array.from(new Set(projects?.map((p) => p.annee) || [])).sort().reverse();
 
@@ -440,12 +499,12 @@ const ProjectsPage: FC = () => {
                 <div>
                   <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
                     <span>{t('project.progress')}</span>
-                    <span className="font-medium">{project.progress}%</span>
+                    <span className="font-medium">{getProjectProgress(project.id)}%</span>
                   </div>
                   <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-primary-500 transition-all"
-                      style={{ width: `${project.progress}%` }}
+                      style={{ width: `${getProjectProgress(project.id)}%` }}
                     />
                   </div>
                 </div>
@@ -531,10 +590,10 @@ const ProjectsPage: FC = () => {
                         <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
                           <div
                             className="h-full bg-primary-500"
-                            style={{ width: `${project.progress}%` }}
+                            style={{ width: `${getProjectProgress(project.id)}%` }}
                           />
                         </div>
-                        <span className="text-xs text-gray-600 w-10">{project.progress}%</span>
+                        <span className="text-xs text-gray-600 w-10">{getProjectProgress(project.id)}%</span>
                       </div>
                     </td>
                     <td className="py-3 px-4 text-right">

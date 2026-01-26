@@ -39,6 +39,9 @@ export interface Project {
   chapitre?: string;             // Chapitre budgétaire
   ordreService?: string;         // Date ordre de service (format: DD/MM/YYYY)
   delaisExecution?: number;      // Délais d'exécution en mois
+  // Intervenants du projet
+  assistanceTechnique?: string;  // L'ASSISTANCE TECHNIQUE
+  maitreOeuvre?: string;         // Le Maître d'Oeuvre
   
   // === Gestion des délais ===
   osc?: string;                  // Ordre de Service de Commencement (date début travaux)

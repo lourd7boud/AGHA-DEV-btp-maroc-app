@@ -9,6 +9,11 @@ import {
   getDeletedProjects,
   restoreProject,
 } from '../controllers/project.controller';
+import {
+  getProjectConfig,
+  createProjectConfig,
+  updateProjectConfig,
+} from '../controllers/revision.controller';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
@@ -71,5 +76,45 @@ router.post('/:id/restore', restoreProject);
  * @access  Private
  */
 router.get('/:id/structure', getProjectStructure);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📐 REVISION CONFIG - صيغة مراجعة الأسعار
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * @route   GET /api/projects/:id/revision-config
+ * @desc    Get project revision formula configuration
+ * @access  Private
+ */
+router.get('/:id/revision-config', getProjectConfig);
+
+/**
+ * @route   POST /api/projects/:id/revision-config
+ * @desc    Create/Update project revision formula configuration
+ * @access  Private
+ */
+router.post('/:id/revision-config', createProjectConfig);
+
+/**
+ * @route   PUT /api/projects/:id/revision-config
+ * @desc    Update project revision formula configuration
+ * @access  Private
+ */
+router.put('/:id/revision-config', updateProjectConfig);
+
+/**
+ * @route   DELETE /api/projects/:id/revision-config
+ * @desc    Delete project revision formula configuration
+ * @access  Private
+ */
+router.delete('/:id/revision-config', async (req, res) => {
+  const pool = (await import('../config/postgres')).getPool();
+  try {
+    await pool.query('DELETE FROM project_revision_config WHERE project_id = $1', [req.params.id]);
+    res.json({ message: 'Config deleted' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete config' });
+  }
+});
 
 export default router;

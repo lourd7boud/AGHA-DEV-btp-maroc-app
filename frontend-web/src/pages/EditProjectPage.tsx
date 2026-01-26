@@ -10,6 +10,7 @@ import { saveCompany, extractCompanyFromProject } from '../services/companyServi
 import CompanyAutocomplete from '../components/CompanyAutocomplete';
 import { isWeb } from '../utils/platform';
 import { apiService } from '../services/apiService';
+import PriceRevisionFormulaEditor, { RevisionFormulaData } from '../components/project/PriceRevisionFormulaEditor';
 
 const EditProjectPage: FC = () => {
   const { t } = useTranslation();
@@ -23,6 +24,7 @@ const EditProjectPage: FC = () => {
   // استخدام useProject بدلاً من useLiveQuery
   const rawId = id?.startsWith('project:') ? id.replace('project:', '') : id;
   const { project, isLoading: projectLoading } = useProject(rawId || null);
+  const [revisionFormula, setRevisionFormula] = useState<RevisionFormulaData | null>(null);
 
   const [formData, setFormData] = useState({
     objet: '',
@@ -44,6 +46,9 @@ const EditProjectPage: FC = () => {
     chapitre: '',
     delaisExecution: '',
     status: 'draft' as 'draft' | 'active' | 'completed' | 'archived',
+    // Intervenants du projet
+    assistanceTechnique: '',
+    maitreOeuvre: '',
     // Gestion des délais
     osc: '', // Ordre de Service de Commencement (date début travaux)
     dateReceptionProvisoire: '', // Date réception provisoire
@@ -80,13 +85,38 @@ const EditProjectPage: FC = () => {
         chapitre: project.chapitre || '',
         delaisExecution: project.delaisExecution?.toString() || '',
         status: project.status || 'draft',
+        // Intervenants du projet
+        assistanceTechnique: project.assistanceTechnique || '',
+        maitreOeuvre: project.maitreOeuvre || '',
         // Gestion des délais
         osc: formatDateForInput(project.osc),
         dateReceptionProvisoire: formatDateForInput(project.dateReceptionProvisoire),
         dateReceptionDefinitive: formatDateForInput(project.dateReceptionDefinitive),
       });
+
+      // Charger la config de révision si web
+      if (isWeb() && rawId) {
+        apiService.get(`/projects/${rawId}/revision-config`)
+          .then((config: any) => {
+            if (config && config.formula) {
+              const weights = Object.entries(config.formula.weights || {}).map(([code, weight]) => ({
+                indexCode: code,
+                indexName: code, // Will be enriched from catalog
+                weight: weight as number
+              }));
+              setRevisionFormula({
+                name: config.formula.name || 'Formule de révision',
+                fixedPart: config.formula.fixedPart || 0.15,
+                weights
+              });
+            }
+          })
+          .catch(() => {
+            // Pas de config existante, c'est OK
+          });
+      }
     }
-  }, [project]);
+  }, [project, rawId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,6 +153,9 @@ const EditProjectPage: FC = () => {
         chapitre: formData.chapitre,
         delaisExecution: formData.delaisExecution ? parseInt(formData.delaisExecution) : undefined,
         status: formData.status,
+        // Intervenants du projet
+        assistanceTechnique: formData.assistanceTechnique || undefined,
+        maitreOeuvre: formData.maitreOeuvre || undefined,
         // Gestion des délais
         osc: formData.osc || undefined,
         dateReceptionProvisoire: formData.dateReceptionProvisoire || undefined,
@@ -134,6 +167,34 @@ const EditProjectPage: FC = () => {
       if (isWeb()) {
         await apiService.updateProject(rawId!, updatedProjectData);
         console.log('✅ [WEB] Projet modifié via API');
+        
+        // Sauvegarder/mettre à jour la config de révision
+        if (revisionFormula) {
+          try {
+            await apiService.post(`/projects/${rawId}/revision-config`, {
+              formula: {
+                name: revisionFormula.name,
+                fixedPart: revisionFormula.fixedPart,
+                weights: revisionFormula.weights.reduce((acc, w) => {
+                  acc[w.indexCode] = w.weight;
+                  return acc;
+                }, {} as Record<string, number>)
+              },
+              baseDate: formData.dateOuverture
+            });
+            console.log('✅ [WEB] Config révision mise à jour');
+          } catch (revErr) {
+            console.warn('⚠️ Erreur mise à jour config révision:', revErr);
+          }
+        } else {
+          // Supprimer la config si désactivée
+          try {
+            await apiService.delete(`/projects/${rawId}/revision-config`);
+          } catch {
+            // Pas de config à supprimer
+          }
+        }
+        
         navigate(`/projects/${rawId}`);
         return;
       }
@@ -512,6 +573,42 @@ const EditProjectPage: FC = () => {
           </div>
         </div>
 
+        {/* Intervenants du projet */}
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Intervenants du projet
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                L'ASSISTANCE TECHNIQUE
+              </label>
+              <input
+                type="text"
+                className="input"
+                value={formData.assistanceTechnique}
+                onChange={(e) => setFormData({ ...formData, assistanceTechnique: e.target.value })}
+                placeholder="Ex: Bureau d'études XYZ"
+              />
+              <p className="text-xs text-gray-500 mt-1">Bureau d'études ou assistance technique</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Le Maître d'Oeuvre
+              </label>
+              <input
+                type="text"
+                className="input"
+                value={formData.maitreOeuvre}
+                onChange={(e) => setFormData({ ...formData, maitreOeuvre: e.target.value })}
+                placeholder="Ex: DPA de Tata"
+              />
+              <p className="text-xs text-gray-500 mt-1">Responsable de la maîtrise d'oeuvre</p>
+            </div>
+          </div>
+        </div>
+
         {/* Gestion des délais */}
         <div>
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
@@ -559,6 +656,24 @@ const EditProjectPage: FC = () => {
               <p className="text-xs text-gray-500 mt-1">Ordre de Service de Commencement</p>
             </div>
           </div>
+        </div>
+
+        {/* Formule de Révision des Prix */}
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Révision des Prix
+          </h2>
+          <PriceRevisionFormulaEditor
+            value={revisionFormula}
+            onChange={setRevisionFormula}
+            dateOuverture={formData.dateOuverture}
+          />
+          {revisionFormula && (
+            <p className="text-xs text-gray-500 mt-2">
+              Les index de base (X₀) seront automatiquement récupérés depuis le mois de la date d'ouverture.
+              Les calculs de révision seront appliqués automatiquement dans chaque décompte.
+            </p>
+          )}
         </div>
 
         {/* Actions */}

@@ -28,7 +28,9 @@ export const createDecompt = async (
       montantCumule, 
       montantPrecedent, 
       montantActuel, 
-      montantTotal, 
+      montantTotal,
+      totalTTC,
+      totalGeneralTTC,
       isDernier 
     } = req.body;
 
@@ -52,9 +54,10 @@ export const createDecompt = async (
     const result = await pool.query(
       `INSERT INTO decompts (
         id, project_id, periode_id, numero, date_decompte, 
-        montant_cumule, montant_precedent, montant_actuel, montant_total, 
+        montant_cumule, montant_precedent, montant_actuel, montant_total,
+        total_ttc, total_general_ttc,
         is_dernier, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
        RETURNING *`,
       [
         decomptId, 
@@ -66,6 +69,8 @@ export const createDecompt = async (
         montantPrecedent || 0,
         montantActuel || 0,
         montantTotal || 0,
+        totalTTC || 0,
+        totalGeneralTTC || totalTTC || 0,
         isDernier || false
       ]
     );
@@ -181,6 +186,7 @@ export const updateDecompt = async (
       montantActuel, 
       montantTotal,
       totalTTC,
+      totalGeneralTTC,
       lignes,
       isDernier,
       statut
@@ -209,11 +215,12 @@ export const updateDecompt = async (
         montant_actuel = COALESCE($6, montant_actuel),
         montant_total = COALESCE($7, montant_total),
         total_ttc = COALESCE($8, total_ttc),
-        lignes = COALESCE($9, lignes),
-        is_dernier = COALESCE($10, is_dernier),
-        statut = COALESCE($11, statut),
+        total_general_ttc = COALESCE($9, total_general_ttc),
+        lignes = COALESCE($10, lignes),
+        is_dernier = COALESCE($11, is_dernier),
+        statut = COALESCE($12, statut),
         updated_at = NOW()
-       WHERE id = $12 RETURNING *`,
+       WHERE id = $13 RETURNING *`,
       [
         periodeId, 
         numero, 
@@ -223,6 +230,7 @@ export const updateDecompt = async (
         montantActuel, 
         montantTotal,
         totalTTC,
+        totalGeneralTTC || totalTTC,
         lignes ? JSON.stringify(lignes) : null,
         isDernier,
         statut,

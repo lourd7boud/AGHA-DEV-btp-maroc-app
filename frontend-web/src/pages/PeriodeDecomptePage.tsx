@@ -34,6 +34,7 @@ import {
   calculateTotalHTWithInternal,
   calculateTVAWithInternal,
   calculateTTCWithInternal,
+  calculateRevisionAmount,
   formatMontant,
   toDecimal,
   round2,
@@ -43,6 +44,13 @@ import {
   type LigneDecompte as FinanceLigneDecompte,
   type CalculatedLigne,
 } from '../utils/financeEngine';
+
+// 📊 Price Revision Engine (Phase 3)
+import {
+  calculateMonthCoefficient,
+  type RevisionFormula,
+  type IndexValues,
+} from '../utils/priceRevisionEngine.v2';
 
 // Alias للتوافق مع الكود القديم (سيتم إزالته تدريجياً)
 const majoration = (value: number | undefined | null): number => {
@@ -84,6 +92,16 @@ const PeriodeDecomptePage: FC = () => {
   const [tauxRetenue, setTauxRetenue] = useState(10); // 10% retenue de garantie
   const [decomptesPrecedents, setDecomptesPrecedents] = useState(0);
   const [depensesExercicesAnterieurs, setDepensesExercicesAnterieurs] = useState(0);
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 📊 RÉVISION DES PRIX - Phase 3
+  // ════════════════════════════════════════════════════════════════════════
+  const [revisionConfig, setRevisionConfig] = useState<{
+    isEnabled: boolean;
+    formula: RevisionFormula | null;
+    baseIndexes: IndexValues | null;
+    currentIndexes: IndexValues | null;
+  } | null>(null);
 
   // Clean IDs (without prefix) for API calls
   const cleanProjectId = rawProjectId?.includes(':') ? rawProjectId.split(':').pop()! : rawProjectId;
@@ -298,6 +316,84 @@ const PeriodeDecomptePage: FC = () => {
     calculatePreviousPayments();
   }, [periode, projectId, project, serverDecompts, serverPeriodes]);
 
+  // ════════════════════════════════════════════════════════════════════════
+  // 📊 RÉVISION DES PRIX - جلب بيانات المراجعة
+  // ════════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    const loadRevisionConfig = async () => {
+      if (!cleanProjectId || !periode) return;
+      
+      try {
+        // جلب إعدادات المراجعة للمشروع
+        const config = await apiService.get(`/revision/config/${cleanProjectId}`);
+        
+        if (!config || !config.isEnabled || !config.formulaId) {
+          console.log('📊 [REVISION] Révision disabled or not configured for project');
+          setRevisionConfig(null);
+          return;
+        }
+        
+        // جلب الصيغة
+        const formula = await apiService.get(`/revision/formulas/${config.formulaId}`);
+        if (!formula) {
+          console.warn('📊 [REVISION] Formula not found:', config.formulaId);
+          setRevisionConfig(null);
+          return;
+        }
+        
+        // جلب مؤشرات الشهر الحالي (بناءً على تاريخ الفترة)
+        const periodeDate = new Date(periode.dateDebut);
+        const year = periodeDate.getFullYear();
+        const month = periodeDate.getMonth() + 1;
+        
+        const indexes = await apiService.get(`/revision/indexes?year=${year}&month=${month}`);
+        const currentMonthIndex = indexes?.find((idx: any) => {
+          const idxDate = new Date(idx.monthDate);
+          return idxDate.getFullYear() === year && idxDate.getMonth() + 1 === month;
+        });
+        
+        if (!currentMonthIndex?.indexValues) {
+          console.log('📊 [REVISION] No indexes found for period:', { year, month });
+          setRevisionConfig({
+            isEnabled: true,
+            formula: {
+              name: formula.name,
+              fixedPart: parseFloat(formula.fixedPart),
+              weights: formula.weights,
+            },
+            baseIndexes: config.baseIndexes,
+            currentIndexes: null, // لم يتم العثور على مؤشرات الشهر
+          });
+          return;
+        }
+        
+        console.log('📊 [REVISION] Config loaded:', {
+          formulaName: formula.name,
+          baseIndexes: config.baseIndexes,
+          currentIndexes: currentMonthIndex.indexValues,
+          periodeMonth: `${year}-${month}`,
+        });
+        
+        setRevisionConfig({
+          isEnabled: true,
+          formula: {
+            name: formula.name,
+            fixedPart: parseFloat(formula.fixedPart),
+            weights: formula.weights,
+          },
+          baseIndexes: config.baseIndexes,
+          currentIndexes: currentMonthIndex.indexValues,
+        });
+        
+      } catch (error) {
+        console.log('📊 [REVISION] Error loading config (revision may not be configured):', error);
+        setRevisionConfig(null);
+      }
+    };
+    
+    loadRevisionConfig();
+  }, [cleanProjectId, periode]);
+
   // Helper to normalize bordereauLigneId (remove prefix if present)
   const normalizeBordereauLigneId = (id: string): string => {
     if (!id) return '';
@@ -386,13 +482,81 @@ const PeriodeDecomptePage: FC = () => {
   const totalHT = totalHTResult.display;
   const totalHTInternal = totalHTResult.internal;
   
-  const tvaResult = calculateTVAWithInternal(totalHTInternal, Number(tauxTVA) || 20);
+  // ════════════════════════════════════════════════════════════════════════
+  // 📊 RÉVISION DES PRIX - Phase 3
+  // ════════════════════════════════════════════════════════════════════════
+  // ⚠️ EXCEL COMPLIANCE:
+  //    1. Total HT (بدون تغيير)
+  //    2. + Montant de la révision
+  //    3. = Nouveau Total HT
+  //    4. → TVA (على Nouveau Total HT)
+  //    5. → TTC
+  // ════════════════════════════════════════════════════════════════════════
+  
+  // حساب معامل المراجعة (إذا كانت المراجعة مفعلة)
+  const revisionResult = useMemo(() => {
+    // التحقق من توفر البيانات اللازمة
+    if (!revisionConfig?.isEnabled || 
+        !revisionConfig.formula || 
+        !revisionConfig.baseIndexes || 
+        !revisionConfig.currentIndexes ||
+        !periode?.isDecompteDernier) {  // ⚠️ المراجعة فقط للديكونت الأخير
+      return null;
+    }
+    
+    try {
+      // حساب المعامل
+      // ⚠️ ترتيب المعاملات: currentIndexes, baseIndexes, formula
+      const coefficientResult = calculateMonthCoefficient(
+        revisionConfig.currentIndexes,
+        revisionConfig.baseIndexes,
+        revisionConfig.formula
+      );
+      
+      // حساب مبلغ المراجعة
+      // ⚠️ استخدام display وليس coefficient
+      const revision = calculateRevisionAmount({
+        montantHTInternal: totalHTInternal,
+        coefficient: coefficientResult.display,
+      });
+      
+      console.log('📊 [REVISION] Calculation result:', {
+        coefficient: coefficientResult.display,
+        montantRevision: revision.montantRevision,
+        nouveauTotalHT: revision.nouveauTotalHT,
+      });
+      
+      return {
+        coefficient: coefficientResult.display,
+        montantRevision: revision.montantRevision,
+        montantRevisionInternal: revision.montantRevisionInternal,
+        nouveauTotalHT: revision.nouveauTotalHT,
+        nouveauTotalHTInternal: revision.nouveauTotalHTInternal,
+      };
+    } catch (error) {
+      console.error('📊 [REVISION] Error calculating revision:', error);
+      return null;
+    }
+  }, [revisionConfig, totalHTInternal, periode?.isDecompteDernier]);
+  
+  // ════════════════════════════════════════════════════════════════════════
+  // تحديد القيم النهائية (مع أو بدون مراجعة)
+  // ════════════════════════════════════════════════════════════════════════
+  // ⚠️ إذا كانت المراجعة مفعلة: نستخدم Nouveau Total HT للـ TVA و TTC
+  // ⚠️ إذا لم تكن مفعلة: نستخدم Total HT العادي (بدون تغيير)
+  // ════════════════════════════════════════════════════════════════════════
+  
+  const effectiveTotalHTInternal = revisionResult 
+    ? revisionResult.nouveauTotalHTInternal 
+    : totalHTInternal;
+  
+  const tvaResult = calculateTVAWithInternal(effectiveTotalHTInternal, Number(tauxTVA) || 20);
   const montantTVA = tvaResult.display;
   const tvaInternal = tvaResult.internal;
   
   // 🔒 EXCEL: TTC = HT_Internal + TVA_Display (TRUNC)
   // نمرر TVA المقطوعة كـ Decimal
-  const ttcResult = calculateTTCWithInternal(totalHTInternal, toDecimal(montantTVA));
+  const ttcResult = calculateTTCWithInternal(effectiveTotalHTInternal, toDecimal(montantTVA));
   const totalTTC = ttcResult.display;
   const ttcInternal = ttcResult.internal;
   
@@ -400,6 +564,12 @@ const PeriodeDecomptePage: FC = () => {
   console.log("[FINANCE ENGINE v2] Calculs:", {
     totalHT_internal: totalHTInternal.toString(),
     totalHT_display: totalHT,
+    revision: revisionResult ? {
+      coefficient: revisionResult.coefficient,
+      montantRevision: revisionResult.montantRevision,
+      nouveauTotalHT: revisionResult.nouveauTotalHT,
+    } : 'N/A (disabled)',
+    effectiveTotalHT: effectiveTotalHTInternal.toString(),
     tva_internal: tvaInternal.toString(),
     tva_display: montantTVA,
     ttc_internal: ttcInternal.toString(),
@@ -514,6 +684,7 @@ const PeriodeDecomptePage: FC = () => {
           lignes: lignes,
           montantTotal: newMontantTotal,
           totalTTC: totalTTC,
+          totalGeneralTTC: totalTTC, // 🔧 Total Général (T.T.C)
           updatedAt: now,
         });
         console.log('✅ Décompte mis à jour automatiquement:', newMontantTotal, 'TTC:', totalTTC);
@@ -557,6 +728,7 @@ const PeriodeDecomptePage: FC = () => {
           lignes: lignes,
           montantTotal: recap.montantAcompte,
           totalTTC: totalTTC,
+          totalGeneralTTC: totalTTC, // 🔧 Total Général (T.T.C) - القيمة التراكمية
           statut: 'draft',
         };
 
@@ -600,6 +772,7 @@ const PeriodeDecomptePage: FC = () => {
             lignes: lignes,
             montantTotal: recap.montantAcompte,
             totalTTC: totalTTC,
+            totalGeneralTTC: totalTTC, // 🔧 Total Général (T.T.C)
             statut: 'draft',
             updatedAt: now,
           });
@@ -623,6 +796,7 @@ const PeriodeDecomptePage: FC = () => {
             lignes: lignes,
             montantTotal: recap.montantAcompte,
             totalTTC: totalTTC,
+            totalGeneralTTC: totalTTC, // 🔧 Total Général (T.T.C)
             statut: 'draft' as const,
             createdAt: now,
             updatedAt: now,
@@ -1001,8 +1175,11 @@ const PeriodeDecomptePage: FC = () => {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {/* ⚠️ استخدام calculatedLignes من financeEngine - وليس lignes */}
-              {calculatedLignes.map((ligne, index) => (
-                <tr key={lignes[index]?.bordereauLigneId || index} className="hover:bg-gray-50">
+              {/* 🔴 إخفاء الأسطر التي كميتها = 0 */}
+              {calculatedLignes
+                .filter(ligne => ligne.quantiteRealisee > 0)
+                .map((ligne) => (
+                <tr key={ligne.prixNo} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-700 font-medium border-r border-gray-200">
                     {ligne.prixNo}
                   </td>
@@ -1035,6 +1212,41 @@ const PeriodeDecomptePage: FC = () => {
                   {formatMontant(totalHT)}
                 </td>
               </tr>
+              {/* 🆕 Lignes supplémentaires pour Décompte Dernier avec Révision des Prix */}
+              {periode?.isDecompteDernier && (() => {
+                // ════════════════════════════════════════════════════════════════
+                // 📊 RÉVISION DES PRIX - Phase 3
+                // ════════════════════════════════════════════════════════════════
+                const revisionPrix = revisionResult?.montantRevision ?? 0;
+                const nouveauTotalHT = revisionResult?.nouveauTotalHT ?? totalHT;
+                const hasRevision = revisionResult !== null;
+                
+                return (
+                  <>
+                    <tr>
+                      <td colSpan={5} className="px-4 py-3 text-right font-medium text-gray-700">
+                        Montant de la révision des prix
+                        {hasRevision && revisionResult?.coefficient && (
+                          <span className="ml-2 text-xs text-gray-500">
+                            (C = {(revisionResult.coefficient * 100).toFixed(2)}%)
+                          </span>
+                        )}
+                      </td>
+                      <td className={`px-4 py-3 text-right font-medium ${revisionPrix >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {revisionPrix >= 0 ? '' : '- '}{formatMontant(Math.abs(revisionPrix))}
+                      </td>
+                    </tr>
+                    <tr className="bg-blue-50">
+                      <td colSpan={5} className="px-4 py-3 text-right font-bold text-gray-900">
+                        TOTAL
+                      </td>
+                      <td className="px-4 py-3 text-right font-bold text-xl text-blue-600">
+                        {formatMontant(nouveauTotalHT)}
+                      </td>
+                    </tr>
+                  </>
+                );
+              })()}
               <tr>
                 <td colSpan={5} className="px-4 py-3 text-right font-bold text-gray-900">
                   Total TVA ({tauxTVA}%)

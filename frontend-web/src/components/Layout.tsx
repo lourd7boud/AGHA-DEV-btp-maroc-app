@@ -11,6 +11,8 @@ import {
   Shield,
   Clock,
   Trash2,
+  TrendingUp,
+  Database,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useState } from 'react';
@@ -44,11 +46,23 @@ const Layout: FC<LayoutProps> = ({ children }) => {
   ];
 
   // Add admin menu item if user is super_admin
-  if (user?.role === 'super_admin') {
+  if (user?.role === 'super_admin' || user?.role === 'admin') {
     menuItems.splice(2, 0, {
       path: '/admin',
       icon: Shield,
       label: 'Administration',
+    });
+    // إضافة رابط مؤشرات المراجعة
+    menuItems.splice(3, 0, {
+      path: '/admin/revision-indexes',
+      icon: TrendingUp,
+      label: 'Révision des Prix',
+    });
+    // إضافة رابط إدارة المؤشرات
+    menuItems.splice(4, 0, {
+      path: '/admin/index-management',
+      icon: Database,
+      label: 'Gestion des Index',
     });
   }
 

@@ -275,8 +275,10 @@ export async function generateDecomptePDF(
   doc.text(periodeText, pageWidth / 2, yPos, { align: 'center' });
   yPos += 10;
 
-  // Table des prestations
-  const tableData = lignes.map(ligne => [
+  // Table des prestations - 🔴 إخفاء الأسطر التي كميتها = 0
+  const tableData = lignes
+    .filter(ligne => ligne.quantiteRealisee > 0)
+    .map(ligne => [
     ligne.prixNo,
     ligne.designation,
     ligne.unite,
@@ -291,24 +293,55 @@ export async function generateDecomptePDF(
   let bodyEndY = 0;
   let tableLeftX = 0;
   
+  // 🆕 بناء footer الجدول - إضافة خانات للديكونت الأخير
+  const footerRows: any[] = [
+    [
+      { content: '', colSpan: 3, styles: { halign: 'left' } },
+      { content: 'Total Général Hors TVA', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } }, 
+      { content: formatMontant(totalHT), styles: { halign: 'right', fontStyle: 'bold' } }
+    ],
+  ];
+  
+  // 🆕 إضافة خانات Montant de la révision و TOTAL للديكونت الأخير فقط
+  if (periode.isDecompteDernier) {
+    // 🔧 Montant de la révision des prix (حالياً = 0، سيتم تفعيله لاحقاً)
+    const revisionPrix = 0; // TODO: سيتم جلبه من البيانات لاحقاً
+    const totalApresRevision = totalHT + revisionPrix;
+    
+    footerRows.push([
+      { content: '', colSpan: 3, styles: { halign: 'left' } },
+      { content: 'Montant de la révision des prix', colSpan: 2, styles: { halign: 'right', fontStyle: 'normal' } },
+      { 
+        content: (revisionPrix >= 0 ? '' : '- ') + formatMontant(Math.abs(revisionPrix)), 
+        styles: { halign: 'right', fontStyle: 'normal', textColor: revisionPrix >= 0 ? [0, 150, 0] : [200, 0, 0] } 
+      }
+    ]);
+    footerRows.push([
+      { content: '', colSpan: 3, styles: { halign: 'left' } },
+      { content: 'TOTAL', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } },
+      { content: formatMontant(totalApresRevision), styles: { halign: 'right', fontStyle: 'bold', fillColor: [230, 240, 255] } }
+    ]);
+  }
+  
+  footerRows.push([
+    { content: '', colSpan: 3, styles: { halign: 'left' } },
+    { content: `Total TVA (${tauxTVA}%)`, colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } },
+    { content: formatMontant(montantTVA), styles: { halign: 'right', fontStyle: 'bold' } }
+  ]);
+  footerRows.push([
+    { content: '', colSpan: 3, styles: { halign: 'left' } },
+    { content: 'Total Général (T.T.C)', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } },
+    { content: formatMontant(totalTTC), styles: { halign: 'right', fontStyle: 'bold' } }
+  ]);
+
+  // حساب آخر صف في footer لرسم الإطار
+  const lastFooterRowIndex = footerRows.length - 1;
+  
   autoTable(doc, {
     startY: yPos,
     head: [['Prix N°', 'DESIGNATIONS DES PRESTATIONS', 'U', 'Quantité', 'Prix U En DH\nhors TVA', 'Prix Total En DH\nhors TVA']],
     body: tableData,
-    foot: [
-      [
-       { content: '', colSpan: 3, styles: { halign: 'left' } },
-       { content: 'Total Général Hors TVA', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } }, 
-       { content: formatMontant(totalHT), styles: { halign: 'right', fontStyle: 'bold' } }],
-      [
-       { content: '', colSpan: 3, styles: { halign: 'left' } },
-       { content: `Total TVA (${tauxTVA}%)`, colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } },
-       { content: formatMontant(montantTVA), styles: { halign: 'right', fontStyle: 'bold' } }],
-      [
-       { content: '', colSpan: 3, styles: { halign: 'left' } },
-       { content: 'Total Général (T.T.C)', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } },
-       { content: formatMontant(totalTTC), styles: { halign: 'right', fontStyle: 'bold' } }],
-    ],
+    foot: footerRows,
     theme: 'grid',
     styles: { fontSize: 8, cellPadding: 2 },
     headStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: 'bold', halign: 'center' },
@@ -339,8 +372,8 @@ export async function generateDecomptePDF(
         tableLeftX = data.cell.x;
       }
       
-      // حفظ موقع نهاية footer
-      if (data.section === 'foot' && data.row.index === 2 && data.column.index === 3) {
+      // حفظ موقع نهاية footer (آخر صف)
+      if (data.section === 'foot' && data.row.index === lastFooterRowIndex && data.column.index === 3) {
         footerEndY = data.cell.y + data.cell.height;
       }
       
@@ -534,32 +567,30 @@ export async function generateDecomptePDF(
   const fileName = `Decompte_${project.marcheNo}_Periode_${periode.numero}_${new Date().toISOString().split('T')[0]}.pdf`;
   
   if (printDirectly) {
-    // طباعة مباشرة باستخدام iframe مخفي
+    // 🔴 طباعة محسّنة - تعمل على جميع المتصفحات
     const pdfBlob = doc.output('blob');
     const pdfUrl = URL.createObjectURL(pdfBlob);
     
-    // إنشاء iframe مخفي
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = 'none';
-    iframe.src = pdfUrl;
+    // فتح نافذة جديدة مع PDF
+    const printWindow = window.open(pdfUrl, '_blank');
     
-    document.body.appendChild(iframe);
-    
-    iframe.onload = () => {
-      setTimeout(() => {
-        iframe.contentWindow?.print();
-        // حذف iframe بعد الطباعة
+    if (printWindow) {
+      // انتظار تحميل PDF ثم طباعة
+      printWindow.onload = () => {
         setTimeout(() => {
-          document.body.removeChild(iframe);
-          URL.revokeObjectURL(pdfUrl);
-        }, 1000);
-      }, 500);
-    };
+          printWindow.print();
+        }, 500);
+      };
+      
+      // تنظيف URL بعد فترة
+      setTimeout(() => {
+        URL.revokeObjectURL(pdfUrl);
+      }, 60000); // دقيقة واحدة
+    } else {
+      // إذا تم حظر النافذة المنبثقة، نحفظ الملف بدلاً من ذلك
+      alert('Le navigateur a bloqué la fenêtre d\'impression. Le PDF sera téléchargé à la place.');
+      doc.save(fileName);
+    }
   } else {
     // حفظ PDF كملف
     doc.save(fileName);

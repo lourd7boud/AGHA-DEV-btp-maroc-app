@@ -34,6 +34,8 @@ export interface Project {
   chapitre?: string;
   ordreService?: string;
   delaisExecution?: number;
+  assistanceTechnique?: string;
+  maitreOeuvre?: string;
   osc?: string;
   arrets?: Array<{
     id: string;

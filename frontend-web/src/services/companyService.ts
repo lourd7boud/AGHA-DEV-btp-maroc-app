@@ -45,7 +45,9 @@ const fetchServerCompanies = async (): Promise<Company[]> => {
       userId: 'server',
       nom: c.nom,
       rc: c.rc || '',
+      cb: c.cb || '',           // 🔴 FIX: Ajout cb
       cnss: c.cnss || '',
+      patente: c.patente || '', // 🔴 FIX: Ajout patente
       usageCount: 1,
       lastUsed: new Date().toISOString(),
       createdAt: new Date().toISOString(),

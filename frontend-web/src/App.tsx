@@ -24,6 +24,10 @@ import SettingsPage from './pages/SettingsPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
 import UsersManagementPage from './pages/UsersManagementPage';
 import TrashPage from './pages/TrashPage';
+// Price Revision Phase 2
+import RevisionIndexesPage from './pages/RevisionIndexesPage';
+// Phase 4B: Index Management
+import IndexManagementPage from './pages/revision/IndexManagementPage';
 import Layout from './components/Layout';
 import SyncIndicator from './components/SyncIndicator';
 import { UpdateNotification } from './components/UpdateNotification';
@@ -432,6 +436,38 @@ function App() {
           element={
             user?.role === 'super_admin' ? (
               <UsersManagementPage />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
+        />
+        
+        {/* ═══════════════════════════════════════════════════════════════════════
+         * 📊 Price Revision (Phase 2: Input Only)
+         * ═══════════════════════════════════════════════════════════════════════ */}
+        <Route
+          path="/admin/revision-indexes"
+          element={
+            user?.role === 'super_admin' ? (
+              <Layout>
+                <RevisionIndexesPage />
+              </Layout>
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
+        />
+        
+        {/* ═══════════════════════════════════════════════════════════════════════
+         * 📊 Index Management (Phase 4B: Admin)
+         * ═══════════════════════════════════════════════════════════════════════ */}
+        <Route
+          path="/admin/index-management"
+          element={
+            user?.role === 'super_admin' || user?.role === 'admin' ? (
+              <Layout>
+                <IndexManagementPage />
+              </Layout>
             ) : (
               <Navigate to="/" replace />
             )

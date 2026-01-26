@@ -33,6 +33,7 @@ import { logSyncOperation } from '../services/syncService';
 import { calculatePartiel, getCalculationType, type UniteType } from '../utils/metreCalculations';
 import { pullLatestData } from '../hooks/useSyncManager';
 import { useDirtyStateStore } from '../store/dirtyStateStore';
+import { generateMetrePDF } from '../utils/metrePdfExport';
 
 // ============================================================
 // 🔒 FINANCE ENGINE - للحسابات المالية (Décompte)
@@ -974,6 +975,47 @@ const MetrePage: FC = () => {
     }
   };
 
+  // ============================================================
+  // 📄 EXPORT METRE PDF - تصدير تفاصيل الميتري
+  // ============================================================
+  const handleExportMetre = async () => {
+    if (!project || !currentPeriode || !bordereau) {
+      alert('Données manquantes pour générer le PDF');
+      return;
+    }
+
+    try {
+      console.log('📄 [EXPORT METRE] Starting PDF generation...');
+      
+      // تحويل metresQuick إلى الشكل المطلوب للتصدير
+      const metresDataForExport = metresQuick.map(mq => ({
+        bordereauLigneId: mq.bordereauLigneId,
+        numeroLigne: mq.numeroLigne,
+        designation: mq.designation,
+        unite: mq.unite,
+        quantiteBordereau: mq.quantiteBordereau,
+        prixUnitaire: mq.prixUnitaire,
+        sections: mq.sections,
+        subSections: mq.subSections,
+        lignes: mq.lignes,
+        cumulPrecedent: mq.cumulPrecedent,
+      }));
+
+      await generateMetrePDF(
+        project,
+        currentPeriode,
+        bordereau,
+        metresDataForExport,
+        metreDate
+      );
+
+      console.log('✅ [EXPORT METRE] PDF generated successfully!');
+    } catch (error) {
+      console.error('❌ [EXPORT METRE] Error:', error);
+      alert('Erreur lors de la génération du PDF');
+    }
+  };
+
   // ============== SAVE FUNCTION ==============
 
   const handleSaveAll = async () => {
@@ -1294,6 +1336,39 @@ const MetrePage: FC = () => {
 
   const getMontantBordereau = () => {
     return metresQuick.reduce((sum, m) => sum + (m.quantiteBordereau * m.prixUnitaire), 0);
+  };
+
+  // 🔧 Total TTC du marché (bordereau × 1.2)
+  const getMontantBordereauTTC = () => {
+    const ht = getMontantBordereau();
+    return ht * 1.2;
+  };
+
+  // 🔧 Total Général TTC réalisé (من آخر ديكونت - لأن كل ديكونت تراكمي)
+  const getTotalGeneralTTC = () => {
+    if (!allDecompts || allDecompts.length === 0) return 0;
+    
+    // إيجاد آخر ديكونت (الأعلى رقماً) - يحتوي على القيم التراكمية
+    const dernierDecompte = allDecompts.reduce((latest: any, d: any) => {
+      if (!latest || d.numero > latest.numero) return d;
+      return latest;
+    }, allDecompts[0]);
+    
+    // 🔧 استخدام totalGeneralTtc (snake_case -> camelCase من Backend)
+    // Backend يحول total_general_ttc إلى totalGeneralTtc
+    const value = dernierDecompte?.totalGeneralTtc || dernierDecompte?.totalTtc || 0;
+    console.log('[getTotalGeneralTTC] Dernier décompte:', {
+      numero: dernierDecompte?.numero,
+      totalGeneralTtc: dernierDecompte?.totalGeneralTtc,
+      totalTtc: dernierDecompte?.totalTtc,
+      valueUsed: value
+    });
+    return Number(value);
+  };
+
+  // 🔧 Montant restant (TTC marché - TTC réalisé)
+  const getMontantRestant = () => {
+    return getMontantBordereauTTC() - getTotalGeneralTTC();
   };
 
   const getPourcentageFinancier = () => {
@@ -1652,7 +1727,10 @@ const MetrePage: FC = () => {
               <DollarSign className="w-4 h-4" />
               Décompte
             </button>
-            <button className="btn btn-secondary flex items-center gap-2">
+            <button 
+              onClick={handleExportMetre}
+              className="btn btn-secondary flex items-center gap-2"
+            >
               <Download className="w-4 h-4" />
               Exporter
             </button>
@@ -1738,17 +1816,23 @@ const MetrePage: FC = () => {
 
       {/* Financial Summary */}
       <div className="card mb-6 bg-gradient-to-r from-primary-50 to-blue-50">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div>
-            <p className="text-sm text-gray-600">Montant Bordereau (HT)</p>
+            <p className="text-sm text-gray-600">Total Marché (TTC)</p>
             <p className="text-xl font-bold text-gray-900">
-              {getMontantBordereau().toLocaleString('fr-MA', { minimumFractionDigits: 2 })} DH
+              {getMontantBordereauTTC().toLocaleString('fr-MA', { minimumFractionDigits: 2 })} DH
             </p>
           </div>
           <div>
-            <p className="text-sm text-gray-600">Montant Réalisé (HT)</p>
+            <p className="text-sm text-gray-600">Total Général (TTC)</p>
             <p className="text-xl font-bold text-primary-600">
-              {getMontantRealise().toLocaleString('fr-MA', { minimumFractionDigits: 2 })} DH
+              {getTotalGeneralTTC().toLocaleString('fr-MA', { minimumFractionDigits: 2 })} DH
+            </p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-600">Montant Restant</p>
+            <p className={`text-xl font-bold ${getMontantRestant() < 0 ? 'text-red-600' : 'text-green-600'}`}>
+              {getMontantRestant().toLocaleString('fr-MA', { minimumFractionDigits: 2 })} DH
             </p>
           </div>
         </div>
