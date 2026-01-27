@@ -117,9 +117,9 @@ export function useRealtimeSync(options: UseRealtimeSyncOptions = {}): UseRealti
       serverUrl = window.location.origin;
     }
 
-    // Check if running in Electron
+    // Check if running in Electron - use production URL
     if (window.navigator.userAgent.includes('Electron') || (window as any).electronAPI) {
-      serverUrl = 'http://162.55.219.151';
+      serverUrl = 'https://marocinfra.com';
     }
 
     realtimeSync.connect(serverUrl, token, deviceId, userId);

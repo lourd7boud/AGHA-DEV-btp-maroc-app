@@ -718,7 +718,7 @@ export const useSyncManager = (userId: string | null) => {
     }
     // Electron uses production server
     if (window.navigator.userAgent.includes('Electron') || (window as any).electronAPI) {
-      serverUrl = 'http://162.55.219.151';
+      serverUrl = 'https://marocinfra.com';
     }
 
     console.log('🔌 Connecting to realtime server:', serverUrl);

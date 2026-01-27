@@ -341,7 +341,7 @@ export const handleOnlineRecovery = async (userId: string): Promise<void> => {
           serverUrl = window.location.origin;
         }
         if (window.navigator.userAgent.includes('Electron') || (window as any).electronAPI) {
-          serverUrl = 'http://162.55.219.151';
+          serverUrl = 'https://marocinfra.com';
         }
         
         realtimeSync.connect(serverUrl, token, deviceId, userId);
