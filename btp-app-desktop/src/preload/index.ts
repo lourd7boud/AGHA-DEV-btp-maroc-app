@@ -201,6 +201,13 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('update:progress', handler);
   },
 
+  // Alias for compatibility with useAutoUpdater
+  onDownloadProgress: (callback: (progress: { percent: number; transferred: number; total: number; bytesPerSecond: number }) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, progress: any) => callback(progress);
+    ipcRenderer.on('update:progress', handler);
+    return () => ipcRenderer.removeListener('update:progress', handler);
+  },
+
   onUpdateDownloaded: (callback: (info: any) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, info: any) => callback(info);
     ipcRenderer.on('update:downloaded', handler);
