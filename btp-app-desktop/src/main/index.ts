@@ -92,6 +92,8 @@ async function createWindow(): Promise<void> {
     // In production, load from the renderer folder
     log.info(`Loading from file: ${rendererPath}`);
     await mainWindow.loadFile(rendererPath);
+    // DEBUG: Open DevTools in production to diagnose issues
+    mainWindow.webContents.openDevTools();
   } else {
     // Fallback: show error
     log.error(`Renderer not found at: ${rendererPath}`);
