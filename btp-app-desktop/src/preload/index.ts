@@ -29,6 +29,9 @@ const electronAPI = {
   /** Get app version */
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
   
+  /** Get app version (alias for compatibility) */
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+  
   /** Get full app info */
   getAppInfo: (): Promise<{
     version: string;
