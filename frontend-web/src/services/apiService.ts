@@ -3,8 +3,8 @@
 // Use relative URL in production (works with Nginx proxy), full URL in development
 const getApiUrl = () => {
   // CRITICAL: Check if Electron context bridge exposed apiUrl
-  if (typeof window !== 'undefined' && (window as any).electron?.apiUrl) {
-    const electronApiUrl = (window as any).electron.apiUrl;
+  if (typeof window !== 'undefined' && (window as any).electronAPI?.apiUrl) {
+    const electronApiUrl = (window as any).electronAPI.apiUrl;
     console.log('🔌 [API] Using Electron API URL:', electronApiUrl);
     return `${electronApiUrl}/api`;
   }

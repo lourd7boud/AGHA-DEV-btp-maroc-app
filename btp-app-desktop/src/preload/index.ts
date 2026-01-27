@@ -23,6 +23,9 @@ const electronAPI = {
   /** Get current platform */
   platform: process.platform as 'win32' | 'darwin' | 'linux',
   
+  /** API URL for backend connection */
+  apiUrl: 'https://marocinfra.com',
+  
   /** Get app version */
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
   
@@ -208,8 +211,9 @@ const electronAPI = {
   },
 };
 
-// Expose the API to the renderer
+// Expose the API to the renderer (both names for compatibility)
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
+contextBridge.exposeInMainWorld('electron', electronAPI);
 
 // Type declaration for the global window object
 declare global {
