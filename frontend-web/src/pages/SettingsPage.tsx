@@ -69,7 +69,7 @@ const SettingsPage: FC = () => {
     const folderName = await selectBaseFolder();
     if (folderName) {
       setSelectedFolder(folderName);
-      setConfig(prev => ({ ...prev, basePath: folderName }));
+      setConfig(prev => ({ ...prev, basePath: folderName, customPath: folderName }));
     }
   };
 
@@ -86,8 +86,11 @@ const SettingsPage: FC = () => {
     }
   };
 
-  // Vérifier si le File System Access API est disponible
-  const isFileSystemAccessSupported = 'showDirectoryPicker' in window;
+  // Check if running in Electron
+  const isElectron = !!(window as any).electronAPI?.isElectron || !!(window as any).electron?.isElectron;
+  
+  // Vérifier si le File System Access API est disponible (or Electron)
+  const isFileSystemAccessSupported = isElectron || 'showDirectoryPicker' in window;
 
   return (
     <div className="max-w-4xl mx-auto">

@@ -544,17 +544,24 @@ export const pullLatestData = async (projectId?: string, forcePull: boolean = fa
   }
 
   let totalPulled = 0;
+  let totalDeleted = 0;
 
   console.log('📥 Starting direct data pull...', projectId ? `for project: ${projectId}` : 'all data');
   addSyncLog({ action: 'PULL_START', success: true, data: { projectId } });
 
   try {
-    // Fetch projects
+    // Fetch projects from server
     const projectsResponse = await apiService.getProjects();
     const projects = projectsResponse.data || projectsResponse;
 
     if (Array.isArray(projects)) {
+      // 🔴 PROFESSIONAL SYNC: Build set of server project IDs for comparison
+      const serverProjectIds = new Set(
+        projects.map(p => normalizeEntityId('project', p.id))
+      );
+
       await db.transaction('rw', db.projects, async () => {
+        // Step 1: Add/Update projects from server
         for (const project of projects) {
           if (projectId && cleanEntityId(project.id) !== cleanEntityId(projectId)) {
             continue;
@@ -568,12 +575,38 @@ export const pullLatestData = async (projectId?: string, forcePull: boolean = fa
           });
           totalPulled++;
         }
+
+        // Step 2: Mark local projects not on server as deleted (Soft Delete Sync)
+        // Only for full sync (no projectId filter)
+        if (!projectId) {
+          const localProjects = await db.projects.toArray();
+          for (const localProject of localProjects) {
+            if (!serverProjectIds.has(localProject.id) && !localProject.deletedAt) {
+              // Project exists locally but not on server - mark as deleted
+              console.log(`🗑️ Marking deleted project: ${localProject.id} (${localProject.objet})`);
+              await db.projects.update(localProject.id, { 
+                deletedAt: new Date().toISOString() 
+              });
+              totalDeleted++;
+            }
+          }
+        }
       });
+
+      if (totalDeleted > 0) {
+        console.log(`🗑️ Soft-deleted ${totalDeleted} projects not found on server`);
+      }
 
       // Fetch related data for each project
       const targetProjects = projectId
         ? projects.filter(p => cleanEntityId(p.id) === cleanEntityId(projectId))
         : projects;
+
+      // 🔴 PROFESSIONAL SYNC: Track server IDs for each entity type per project
+      const serverBordereauxIds = new Set<string>();
+      const serverPeriodesIds = new Set<string>();
+      const serverMetresIds = new Set<string>();
+      const serverDecomptsIds = new Set<string>();
 
       for (const project of targetProjects) {
         const cleanProjId = cleanEntityId(project.id);
@@ -587,9 +620,11 @@ export const pullLatestData = async (projectId?: string, forcePull: boolean = fa
           if (Array.isArray(bordereaux) && bordereaux.length > 0) {
             await db.transaction('rw', db.bordereaux, async () => {
               for (const item of bordereaux) {
+                const normalizedId = normalizeEntityId('bordereau', item.id);
+                serverBordereauxIds.add(normalizedId);
                 await db.bordereaux.put({
                   ...item,
-                  id: normalizeEntityId('bordereau', item.id),
+                  id: normalizedId,
                   projectId: normalizedProjId,
                 });
                 totalPulled++;
@@ -606,9 +641,11 @@ export const pullLatestData = async (projectId?: string, forcePull: boolean = fa
           if (Array.isArray(periodes) && periodes.length > 0) {
             await db.transaction('rw', db.periodes, async () => {
               for (const item of periodes) {
+                const normalizedId = normalizeEntityId('periode', item.id);
+                serverPeriodesIds.add(normalizedId);
                 await db.periodes.put({
                   ...item,
-                  id: normalizeEntityId('periode', item.id),
+                  id: normalizedId,
                   projectId: normalizedProjId,
                 });
                 totalPulled++;
@@ -625,9 +662,11 @@ export const pullLatestData = async (projectId?: string, forcePull: boolean = fa
           if (Array.isArray(metres) && metres.length > 0) {
             await db.transaction('rw', db.metres, async () => {
               for (const item of metres) {
+                const normalizedId = normalizeEntityId('metre', item.id);
+                serverMetresIds.add(normalizedId);
                 await db.metres.put({
                   ...item,
-                  id: normalizeEntityId('metre', item.id),
+                  id: normalizedId,
                   projectId: normalizedProjId,
                   periodeId: item.periodeId ? normalizeEntityId('periode', item.periodeId) : '',
                 });
@@ -645,9 +684,11 @@ export const pullLatestData = async (projectId?: string, forcePull: boolean = fa
           if (Array.isArray(decompts) && decompts.length > 0) {
             await db.transaction('rw', db.decompts, async () => {
               for (const item of decompts) {
+                const normalizedId = normalizeEntityId('decompt', item.id);
+                serverDecomptsIds.add(normalizedId);
                 await db.decompts.put({
                   ...item,
-                  id: normalizeEntityId('decompt', item.id),
+                  id: normalizedId,
                   projectId: normalizedProjId,
                   periodeId: item.periodeId ? normalizeEntityId('periode', item.periodeId) : '',
                 });
@@ -656,6 +697,50 @@ export const pullLatestData = async (projectId?: string, forcePull: boolean = fa
             });
           }
         } catch (e) { console.log('No decompts for project:', cleanProjId); }
+      }
+
+      // 🔴 PROFESSIONAL SYNC: Soft-delete local entities not found on server
+      // This handles the case where entities were deleted on the server but still exist locally
+      let totalEntitiesDeleted = 0;
+
+      // Soft-delete bordereaux not on server
+      const localBordereaux = await db.bordereaux.filter(b => !b.deletedAt).toArray();
+      for (const local of localBordereaux) {
+        if (!serverBordereauxIds.has(local.id)) {
+          await db.bordereaux.update(local.id, { deletedAt: new Date().toISOString() });
+          totalEntitiesDeleted++;
+        }
+      }
+
+      // Soft-delete periodes not on server
+      const localPeriodes = await db.periodes.filter(p => !p.deletedAt).toArray();
+      for (const local of localPeriodes) {
+        if (!serverPeriodesIds.has(local.id)) {
+          await db.periodes.update(local.id, { deletedAt: new Date().toISOString() });
+          totalEntitiesDeleted++;
+        }
+      }
+
+      // Soft-delete metres not on server
+      const localMetres = await db.metres.filter(m => !m.deletedAt).toArray();
+      for (const local of localMetres) {
+        if (!serverMetresIds.has(local.id)) {
+          await db.metres.update(local.id, { deletedAt: new Date().toISOString() });
+          totalEntitiesDeleted++;
+        }
+      }
+
+      // Soft-delete decompts not on server
+      const localDecompts = await db.decompts.filter(d => !d.deletedAt).toArray();
+      for (const local of localDecompts) {
+        if (!serverDecomptsIds.has(local.id)) {
+          await db.decompts.update(local.id, { deletedAt: new Date().toISOString() });
+          totalEntitiesDeleted++;
+        }
+      }
+
+      if (totalEntitiesDeleted > 0) {
+        console.log(`🗑️ Soft-deleted ${totalEntitiesDeleted} entities (bordereaux/periodes/metres/decompts) not found on server`);
       }
     }
 

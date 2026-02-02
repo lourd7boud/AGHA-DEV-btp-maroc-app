@@ -413,3 +413,118 @@ export class ProjetDatabase extends Dexie {
 }
 
 export const db = new ProjetDatabase();
+
+// ==================== PROFESSIONAL SYNC UTILITIES ====================
+
+/**
+ * Force Full Sync: Clears all local data and re-fetches from server
+ * Use this when there's a sync mismatch or data corruption
+ */
+export const forceFullSync = async (): Promise<void> => {
+  console.log('🔄 Starting Force Full Sync - clearing all local data...');
+  
+  await db.transaction('rw', 
+    [db.projects, db.bordereaux, db.periodes, db.metres, db.decompts, db.photos, db.pvs, db.attachments, db.syncOperations],
+    async () => {
+      // Clear all data tables
+      await db.projects.clear();
+      await db.bordereaux.clear();
+      await db.periodes.clear();
+      await db.metres.clear();
+      await db.decompts.clear();
+      await db.photos.clear();
+      await db.pvs.clear();
+      await db.attachments.clear();
+      // Clear sync queue too
+      await db.syncOperations.clear();
+    }
+  );
+  
+  // Clear localStorage sync timestamp
+  localStorage.removeItem('lastSyncTimestamp');
+  localStorage.removeItem('lastSuccessfulSync');
+  
+  console.log('✅ Force Full Sync: All local data cleared. Ready for fresh sync.');
+};
+
+/**
+ * Purge soft-deleted items older than specified days
+ * Call periodically to clean up tombstones
+ */
+export const purgeSoftDeleted = async (daysOld: number = 30): Promise<number> => {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+  const cutoffStr = cutoffDate.toISOString();
+  
+  let totalPurged = 0;
+  
+  await db.transaction('rw', 
+    [db.projects, db.bordereaux, db.periodes, db.metres, db.decompts],
+    async () => {
+      // Purge old deleted projects
+      const deletedProjects = await db.projects.filter(p => !!(p.deletedAt && p.deletedAt < cutoffStr)).toArray();
+      for (const p of deletedProjects) {
+        await db.projects.delete(p.id);
+        totalPurged++;
+      }
+      
+      // Purge old deleted bordereaux
+      const deletedBordereaux = await db.bordereaux.filter(b => !!(b.deletedAt && b.deletedAt < cutoffStr)).toArray();
+      for (const b of deletedBordereaux) {
+        await db.bordereaux.delete(b.id);
+        totalPurged++;
+      }
+      
+      // Purge old deleted periodes
+      const deletedPeriodes = await db.periodes.filter(p => !!(p.deletedAt && p.deletedAt < cutoffStr)).toArray();
+      for (const p of deletedPeriodes) {
+        await db.periodes.delete(p.id);
+        totalPurged++;
+      }
+      
+      // Purge old deleted metres
+      const deletedMetres = await db.metres.filter(m => !!(m.deletedAt && m.deletedAt < cutoffStr)).toArray();
+      for (const m of deletedMetres) {
+        await db.metres.delete(m.id);
+        totalPurged++;
+      }
+      
+      // Purge old deleted decompts
+      const deletedDecompts = await db.decompts.filter(d => !!(d.deletedAt && d.deletedAt < cutoffStr)).toArray();
+      for (const d of deletedDecompts) {
+        await db.decompts.delete(d.id);
+        totalPurged++;
+      }
+    }
+  );
+  
+  if (totalPurged > 0) {
+    console.log(`🗑️ Purged ${totalPurged} soft-deleted items older than ${daysOld} days`);
+  }
+  
+  return totalPurged;
+};
+
+/**
+ * Get sync statistics for debugging
+ */
+export const getSyncStats = async () => {
+  const projectsCount = await db.projects.filter(p => !p.deletedAt).count();
+  const deletedProjectsCount = await db.projects.filter(p => !!p.deletedAt).count();
+  const bordereauxCount = await db.bordereaux.filter(b => !b.deletedAt).count();
+  const periodesCount = await db.periodes.filter(p => !p.deletedAt).count();
+  const metresCount = await db.metres.filter(m => !m.deletedAt).count();
+  const decomptsCount = await db.decompts.filter(d => !d.deletedAt).count();
+  const pendingSyncCount = await db.syncOperations.where('synced').equals(0).count();
+  
+  return {
+    projects: projectsCount,
+    deletedProjects: deletedProjectsCount,
+    bordereaux: bordereauxCount,
+    periodes: periodesCount,
+    metres: metresCount,
+    decompts: decomptsCount,
+    pendingSync: pendingSyncCount,
+    lastSync: localStorage.getItem('lastSyncTimestamp'),
+  };
+};

@@ -68,11 +68,26 @@ const useElectronProjects = (userId: string | null) => {
       const response = await apiService.getProjects();
       const serverProjects = (response.data || response) as any[];
       
+      // Create a Set of server project IDs for efficient lookup
+      const serverProjectIds = new Set(
+        serverProjects.map(p => p.id.includes(':') ? p.id : `project:${p.id}`)
+      );
+      
       // Update local DB
       await db.transaction('rw', db.projects, async () => {
+        // Add/Update projects from server
         for (const project of serverProjects) {
           const id = project.id.includes(':') ? project.id : `project:${project.id}`;
           await db.projects.put({ ...project, id });
+        }
+        
+        // 🔴 PROFESSIONAL SYNC: Soft-delete local projects not found on server
+        const localProjects = await db.projects.filter(p => !p.deletedAt).toArray();
+        for (const local of localProjects) {
+          if (!serverProjectIds.has(local.id)) {
+            console.log(`🗑️ Soft-deleting project not on server: ${local.id}`);
+            await db.projects.update(local.id, { deletedAt: new Date().toISOString() });
+          }
         }
       });
     } catch (err) {

@@ -5,6 +5,22 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import './i18n';
 import './index.css';
+import { db, forceFullSync, purgeSoftDeleted, getSyncStats } from './db/database';
+
+// 🔴 PROFESSIONAL SYNC: Expose utilities for debugging and troubleshooting
+// Access via browser DevTools console:
+//   window.dbUtils.getSyncStats()
+//   window.dbUtils.forceFullSync()
+//   window.dbUtils.purgeSoftDeleted(30)
+if (typeof window !== 'undefined') {
+  (window as any).dbUtils = {
+    db,
+    forceFullSync,
+    purgeSoftDeleted,
+    getSyncStats,
+  };
+  console.log('🔧 dbUtils exposed on window. Use window.dbUtils.getSyncStats() to check sync status.');
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {

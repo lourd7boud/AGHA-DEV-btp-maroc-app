@@ -283,34 +283,63 @@ const ProjectDetailPage: FC = () => {
     // 🌐 Web: استخدام API مباشر
     if (isWeb()) {
       try {
+        // 🔧 FIX v1.3.1: حساب الرقم الجديد بشكل صحيح (أعلى رقم + 1)
+        const existingNumeros = (periodes || []).map((p: any) => p.numero || 0);
+        const maxNumero = existingNumeros.length > 0 ? Math.max(...existingNumeros) : 0;
+        const newNumero = maxNumero + 1;
+        
+        console.log('[handleCreateNewMetre] Creating période:', {
+          projectId: rawId,
+          existingCount: periodes?.length,
+          maxNumero,
+          newNumero
+        });
+        
         // إنشاء période جديدة
         const periodeRes = await apiService.createPeriode({
           projectId: rawId!,
-          numero: (periodes?.length || 0) + 1,
-          libelle: `Période ${(periodes?.length || 0) + 1}`,
+          numero: newNumero,
+          libelle: `Période ${newNumero}`,
           dateDebut: now,
           dateFin: now,
           statut: 'en_cours',
         });
-        const newPeriodeId = periodeRes.data?.id || periodeRes.id;
         
-        // إنشاء décompte مرتبط
-        await apiService.createDecompt({
+        const newPeriodeId = periodeRes.data?.id || periodeRes.id;
+        console.log('[handleCreateNewMetre] Période created:', newPeriodeId);
+        
+        if (!newPeriodeId) {
+          throw new Error('Période ID not returned from API');
+        }
+        
+        // 🔧 FIX v1.3.1: إنشاء décompte مرتبط مع projectId صحيح
+        console.log('[handleCreateNewMetre] Creating décompte:', {
           projectId: rawId,
           periodeId: newPeriodeId,
-          numero: (periodes?.length || 0) + 1,
+          numero: newNumero
+        });
+        
+        const decomptRes = await apiService.createDecompt({
+          projectId: rawId!,
+          periodeId: newPeriodeId,
+          numero: newNumero,
           statut: 'draft',
         });
+        
+        console.log('[handleCreateNewMetre] Décompte created:', decomptRes);
         
         // Refresh data
         refreshPeriodes();
         refreshDecompts();
         
         // Navigate to metre page
-        navigate(`/projects/${rawId}/metre/${newPeriodeId.replace('periode:', '')}`);
-      } catch (error) {
-        console.error('Error creating new metre:', error);
-        alert('Erreur lors de la création du métré');
+        const periodeIdForNav = newPeriodeId.replace('periode:', '');
+        console.log('[handleCreateNewMetre] Navigating to:', `/projects/${rawId}/metre/${periodeIdForNav}`);
+        navigate(`/projects/${rawId}/metre/${periodeIdForNav}`);
+      } catch (error: any) {
+        console.error('[handleCreateNewMetre] Error:', error);
+        console.error('[handleCreateNewMetre] Error details:', error.response?.data || error.message);
+        alert('Erreur lors de la création du métré: ' + (error.response?.data?.message || error.message));
       }
       return;
     }

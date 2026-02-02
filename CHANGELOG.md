@@ -13,6 +13,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.1] - 2026-02-02
+
+### 🔧 Production Bug Fixes - Métré & Décompte Creation
+
+This patch release fixes critical issues with métré/décompte creation in Web production.
+
+### Fixed
+- **Sequential Métré Numbering**: Fixed incorrect métré numbering (was using array length instead of max numero + 1)
+  - Now correctly calculates next number as `Math.max(...existingNumeros) + 1`
+  - Prevents duplicate números like "Métré N° 2" appearing twice
+  
+- **Décompte Creation**: Fixed décompte not being created when creating new métré
+  - Added proper `projectId` validation (was passing undefined in some cases)
+  - Added comprehensive logging for debugging
+
+- **Nginx Port Configuration**: Fixed API proxy pointing to wrong port
+  - Changed upstream from `127.0.0.1:3000` to `127.0.0.1:5000`
+  - Backend Docker container now accessible from nginx
+
+- **Backend Environment Variables**: Fixed PostgreSQL connection
+  - Backend was looking for `POSTGRES_HOST` but container had `PGHOST`
+  - Container now starts with correct environment variables
+
+### Data Cleanup
+- Removed test data (Métré N° 99)
+- Fixed duplicate périodes numbering in affected projects
+
+### 🔒 No Impact On
+- Existing métré/décompte data (read-only fixes)
+- Financial calculations
+- Electron app functionality
+
+---
+
 ## [1.1.1] - 2025-12-30
 
 ### 🔧 Infrastructure & Bug Fixes

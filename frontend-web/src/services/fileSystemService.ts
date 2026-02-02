@@ -240,8 +240,48 @@ export const saveFileToProjectFolder = async (
  * Obtenir le handle du dossier de base (pour File System Access API)
  */
 let baseFolderHandle: FileSystemDirectoryHandle | null = null;
+let electronBaseFolderPath: string | null = null;
+
+// Check if running in Electron
+const isElectron = (): boolean => {
+  return !!(window as any).electronAPI?.isElectron || !!(window as any).electron?.isElectron;
+};
+
+// Get Electron API
+const getElectronAPI = () => {
+  return (window as any).electronAPI || (window as any).electron;
+};
 
 export const selectBaseFolder = async (): Promise<string | null> => {
+  // For Electron: use native dialog
+  if (isElectron()) {
+    const electronAPI = getElectronAPI();
+    if (electronAPI?.selectFolder) {
+      try {
+        const result = await electronAPI.selectFolder();
+        if (result.success && result.folderPath) {
+          electronBaseFolderPath = result.folderPath;
+          
+          const config = getStorageConfig();
+          config.basePath = result.folderPath;
+          config.customPath = result.folderPath;
+          saveStorageConfig(config);
+          
+          localStorage.setItem('base_folder_name', result.folderPath);
+          localStorage.setItem('base_folder_path', result.folderPath);
+          
+          console.log('✅ [Electron] Dossier de base sélectionné:', result.folderPath);
+          return result.folderPath;
+        }
+        return null;
+      } catch (error) {
+        console.warn('[Electron] Sélection de dossier annulée:', error);
+        return null;
+      }
+    }
+  }
+  
+  // For Web: use File System Access API
   if (!('showDirectoryPicker' in window)) {
     alert('Votre navigateur ne supporte pas la sélection de dossiers. Utilisez Chrome, Edge ou Opera.');
     return null;
@@ -268,6 +308,23 @@ export const selectBaseFolder = async (): Promise<string | null> => {
     console.warn('Sélection de dossier annulée:', error);
     return null;
   }
+};
+
+/**
+ * Get base folder path (for Electron)
+ */
+export const getBaseFolderPath = (): string | null => {
+  // First check memory
+  if (electronBaseFolderPath) return electronBaseFolderPath;
+  
+  // Then check localStorage
+  const saved = localStorage.getItem('base_folder_path');
+  if (saved) {
+    electronBaseFolderPath = saved;
+    return saved;
+  }
+  
+  return null;
 };
 
 /**
@@ -305,14 +362,52 @@ export const exportToProjectFolder = async (
   fileName: string,
   blob: Blob
 ): Promise<boolean> => {
-  const targetPath = `${projectPath}/${category === 'bordereau' ? 'Bordereau' : 
+  const categoryFolder = category === 'bordereau' ? 'Bordereau' : 
     category === 'metre' ? 'Métré' :
     category === 'decomptes' ? 'Décomptes' :
     category === 'attachements' ? 'Attachements' :
     category === 'photos' ? 'Photos' :
-    category === 'pv' ? 'PV' : 'Documents'}`;
+    category === 'pv' ? 'PV' : 'Documents';
   
-  // Essayer de sauvegarder dans le dossier sélectionné
+  const targetPath = `${projectPath}/${categoryFolder}`;
+  
+  // For Electron: use native file system
+  if (isElectron()) {
+    const electronAPI = getElectronAPI();
+    const basePath = getBaseFolderPath();
+    
+    if (basePath && electronAPI?.saveToPath) {
+      try {
+        // Construct full path: basePath/projectPath/categoryFolder/fileName
+        const fullPath = `${basePath}/${targetPath}/${fileName}`;
+        const data = new Uint8Array(await blob.arrayBuffer());
+        
+        const result = await electronAPI.saveToPath(data, fullPath);
+        if (result.success) {
+          console.log('✅ [Electron] Fichier exporté:', fullPath);
+          return true;
+        }
+      } catch (error) {
+        console.warn('[Electron] Erreur export vers dossier:', error);
+      }
+    }
+    
+    // Fallback: use save dialog
+    if (electronAPI?.saveFile) {
+      try {
+        const data = new Uint8Array(await blob.arrayBuffer());
+        const result = await electronAPI.saveFile(data, fileName);
+        if (result.success) {
+          console.log('✅ [Electron] Fichier sauvegardé via dialog:', result.filePath);
+          return true;
+        }
+      } catch (error) {
+        console.warn('[Electron] Erreur sauvegarde:', error);
+      }
+    }
+  }
+  
+  // For Web: use File System Access API if available
   if (baseFolderHandle) {
     try {
       const folderHandle = await createSubfolder(targetPath);
@@ -338,6 +433,39 @@ export const exportToProjectFolder = async (
   URL.revokeObjectURL(url);
   
   return true;
+};
+
+/**
+ * Créer la structure de dossiers pour un projet (Electron uniquement)
+ */
+export const createProjectFolderStructure = async (projectPath: string): Promise<boolean> => {
+  if (!isElectron()) {
+    console.log('createProjectFolderStructure: Non-Electron, skipping');
+    return false;
+  }
+  
+  const electronAPI = getElectronAPI();
+  const basePath = getBaseFolderPath();
+  
+  if (!basePath || !electronAPI?.saveToPath) {
+    console.warn('No base folder selected or Electron API not available');
+    return false;
+  }
+  
+  try {
+    // Create a placeholder file in each subfolder to ensure folders are created
+    for (const subfolder of PROJECT_SUBFOLDERS) {
+      const placeholderPath = `${basePath}/${projectPath}/${subfolder}/.gitkeep`;
+      const data = new Uint8Array(0);
+      await electronAPI.saveToPath(data, placeholderPath);
+    }
+    
+    console.log('✅ [Electron] Structure de dossiers créée:', `${basePath}/${projectPath}`);
+    return true;
+  } catch (error) {
+    console.error('[Electron] Erreur création structure dossiers:', error);
+    return false;
+  }
 };
 
 // Note: ElectronAPI types are declared in src/types/electron.d.ts
