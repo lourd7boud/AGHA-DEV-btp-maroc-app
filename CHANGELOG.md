@@ -13,6 +13,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.2] - 2026-02-02
+
+### 🔧 Database Schema Fix - Décompte Creation
+
+This patch fixes a critical database schema issue causing décompte creation to fail with 500 error.
+
+### Fixed
+- **Missing Database Column**: Added `total_general_ttc` column to `decompts` table
+  - Production database was missing this column while development had it
+  - Backend INSERT query failed with "column does not exist" error
+  - Added migration script: `010_add_total_general_ttc_to_decompts.sql`
+
+### Root Cause
+- Development database was updated manually with new column
+- Production database migration was not applied
+- This caused schema mismatch between environments
+
+### 🔒 No Impact On
+- Existing décompte data
+- Financial calculations
+- Other features
+
+---
+
 ## [1.3.1] - 2026-02-02
 
 ### 🔧 Production Bug Fixes - Métré & Décompte Creation
