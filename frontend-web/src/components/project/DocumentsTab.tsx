@@ -1,14 +1,16 @@
 /**
- * DocumentsTab Component (V1)
+ * DocumentsTab Component (V2)
  * Upload and display documents for a project
  * Server-first architecture
+ * V2: Added inline PDF viewer
  */
 
 import { FC, useState, useRef } from 'react';
-import { Paperclip, Upload, Trash2, Download, Loader2, FileText, File, FileSpreadsheet, FileImage } from 'lucide-react';
+import { Paperclip, Upload, Trash2, Download, Loader2, FileText, File, FileSpreadsheet, FileImage, Eye } from 'lucide-react';
 import { assetService, ProjectAsset } from '../../services/assetService';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import PDFViewer from './PDFViewer';
 
 interface DocumentsTabProps {
   projectId: string;
@@ -39,6 +41,7 @@ const DocumentsTab: FC<DocumentsTabProps> = ({ projectId, documents, onRefresh }
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [viewingPDF, setViewingPDF] = useState<ProjectAsset | null>(null);
 
   const handleSelectFile = () => {
     fileInputRef.current?.click();
@@ -95,8 +98,18 @@ const DocumentsTab: FC<DocumentsTabProps> = ({ projectId, documents, onRefresh }
   };
 
   const handleView = (doc: ProjectAsset) => {
-    const url = assetService.getAssetUrl(doc.storagePath);
-    window.open(url, '_blank');
+    // If PDF, open inline viewer
+    if (doc.mimeType.includes('pdf')) {
+      setViewingPDF(doc);
+    } else {
+      // For other files, open in new tab
+      const url = assetService.getAssetUrl(doc.storagePath);
+      window.open(url, '_blank');
+    }
+  };
+
+  const handleClosePDFViewer = () => {
+    setViewingPDF(null);
   };
 
   // Empty state
@@ -216,6 +229,16 @@ const DocumentsTab: FC<DocumentsTabProps> = ({ projectId, documents, onRefresh }
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                  {/* View button - especially for PDFs */}
+                  {doc.mimeType.includes('pdf') && (
+                    <button
+                      onClick={() => handleView(doc)}
+                      className="p-2 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Afficher le PDF"
+                    >
+                      <Eye className="w-5 h-5 text-blue-600" />
+                    </button>
+                  )}
                   <button
                     onClick={() => handleDownload(doc)}
                     className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -241,6 +264,16 @@ const DocumentsTab: FC<DocumentsTabProps> = ({ projectId, documents, onRefresh }
           );
         })}
       </div>
+
+      {/* PDF Viewer Modal */}
+      {viewingPDF && (
+        <PDFViewer
+          url={assetService.getAssetUrl(viewingPDF.storagePath)}
+          fileName={viewingPDF.originalName}
+          onClose={handleClosePDFViewer}
+          onDownload={() => handleDownload(viewingPDF)}
+        />
+      )}
     </div>
   );
 };
