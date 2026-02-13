@@ -130,6 +130,13 @@ interface DecomptRevision {
 // COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Interface for missing indexes tracking
+interface MissingIndexInfo {
+  indexCode: string;
+  months: string[];
+  isBaseIndex: boolean;
+}
+
 const RevisionTab: React.FC<Props> = ({
   project,
   decompts,
@@ -144,6 +151,10 @@ const RevisionTab: React.FC<Props> = ({
   // Index data
   const [monthCoefficients, setMonthCoefficients] = useState<MonthCoefficient[]>([]);
   const [decomptRevisions, setDecomptRevisions] = useState<DecomptRevision[]>([]);
+  
+  // Missing indexes tracking
+  const [missingIndexes, setMissingIndexes] = useState<MissingIndexInfo[]>([]);
+  const [hasMissingIndexes, setHasMissingIndexes] = useState(false);
   
   // Expanded states
   const [expandedDecompts, setExpandedDecompts] = useState<Set<string>>(new Set());
@@ -233,6 +244,8 @@ const RevisionTab: React.FC<Props> = ({
       setIsLoading(true);
     }
     setError(null);
+    setMissingIndexes([]);
+    setHasMissingIndexes(false);
     
     try {
       // Determine date range: from O.S.C to last decompt
@@ -275,6 +288,62 @@ const RevisionTab: React.FC<Props> = ({
             indexesMap.set(key, value);
           }
         });
+      }
+      
+      // ═══════════════════════════════════════════════════════════════════════
+      // CHECK FOR MISSING INDEXES
+      // ═══════════════════════════════════════════════════════════════════════
+      const baseIndexes = revisionConfig.baseIndexes || {};
+      const missingInfo: MissingIndexInfo[] = [];
+      
+      console.log('[RevisionTab] Checking missing indexes:', {
+        indexCodes,
+        baseIndexes,
+        revisionConfig: revisionConfig
+      });
+      
+      // Check base indexes first (from project config, NOT from monthly indexes)
+      for (const indexCode of indexCodes) {
+        const baseValue = baseIndexes[indexCode];
+        // Base index is missing if undefined, null, 0, or not in config
+        if (baseValue === undefined || baseValue === null || baseValue === 0) {
+          missingInfo.push({
+            indexCode,
+            months: [baseMonthKey + ' (base)'],
+            isBaseIndex: true
+          });
+        }
+      }
+      
+      // Check monthly indexes (only for indexes that have valid base values)
+      const allMonths = Array.from(indexesMap.keys()).sort();
+      for (const indexCode of indexCodes) {
+        // Skip if already marked as missing base index
+        if (missingInfo.some(m => m.indexCode === indexCode && m.isBaseIndex)) continue;
+        
+        const missingMonths: string[] = [];
+        for (const monthKey of allMonths) {
+          const monthIndexes = indexesMap.get(monthKey);
+          // Monthly index is missing only if undefined or null (100 can be a valid placeholder)
+          if (!monthIndexes || monthIndexes[indexCode] === undefined || 
+              monthIndexes[indexCode] === null) {
+            missingMonths.push(monthKey);
+          }
+        }
+        
+        // Only report if there are missing months (and not ALL months are missing)
+        if (missingMonths.length > 0 && missingMonths.length < allMonths.length) {
+          missingInfo.push({
+            indexCode,
+            months: missingMonths,
+            isBaseIndex: false
+          });
+        }
+      }
+      
+      if (missingInfo.length > 0) {
+        setMissingIndexes(missingInfo);
+        setHasMissingIndexes(true);
       }
       
       // Calculate coefficients (pass baseMonthKey to mark it)
@@ -640,6 +709,68 @@ const RevisionTab: React.FC<Props> = ({
           </div>
         </div>
       </div>
+
+      {/* Missing Indexes Warning */}
+      {hasMissingIndexes && missingIndexes.length > 0 && (
+        <div className="card border-l-4 border-orange-400 bg-orange-50 p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-6 h-6 text-orange-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="font-semibold text-orange-800">
+                ⚠️ Index manquants détectés
+              </h3>
+              <p className="text-orange-700 mt-1 text-sm">
+                Certains index requis par la formule de révision ne sont pas disponibles dans la base de données. 
+                Les coefficients affichés peuvent être incorrects ou incomplets.
+              </p>
+              
+              <div className="mt-3 space-y-2">
+                {missingIndexes.map((info, idx) => (
+                  <div key={idx} className="bg-white/50 rounded-lg p-3 border border-orange-200">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                        info.isBaseIndex 
+                          ? 'bg-red-100 text-red-700' 
+                          : 'bg-orange-100 text-orange-700'
+                      }`}>
+                        {info.indexCode}
+                      </span>
+                      {info.isBaseIndex && (
+                        <span className="text-xs text-red-600 font-medium">
+                          (Index de base manquant - critique)
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-orange-700 mt-1">
+                      {info.isBaseIndex 
+                        ? `L'index de base "${info.indexCode}" n'est pas défini pour l'époque de base.`
+                        : `Manquant pour ${info.months.length} mois: ${info.months.slice(0, 5).join(', ')}${info.months.length > 5 ? '...' : ''}`
+                      }
+                    </p>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link
+                  to="/revision/indexes"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700 transition-colors"
+                >
+                  <TrendingUp className="w-4 h-4" />
+                  Gérer les index
+                </Link>
+                <Link
+                  to={`/projects/${project.id}/edit`}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-white text-orange-700 rounded-lg text-sm font-medium border border-orange-300 hover:bg-orange-50 transition-colors"
+                >
+                  <Settings className="w-4 h-4" />
+                  Modifier la formule
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* View Tabs */}
       <div className="flex gap-2 border-b border-gray-200">

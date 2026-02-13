@@ -20,6 +20,7 @@ export interface ProjectAsset {
   createdBy: string;
   createdByName?: string;
   metadata: Record<string, any>;
+  albumId?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -95,12 +96,18 @@ class AssetService {
   async uploadPhotos(
     projectId: string,
     files: File[],
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
+    albumId?: string
   ): Promise<ProjectAsset[]> {
     const formData = new FormData();
     files.forEach(file => {
       formData.append('files', file);
     });
+    
+    // Add album ID if provided
+    if (albumId) {
+      formData.append('albumId', albumId);
+    }
 
     try {
       const response = await apiService.postFormData(

@@ -1,7 +1,7 @@
 /**
- * PDFViewer Component
+ * PDFViewer Component (V2)
  * Display PDF files inline without downloading
- * Uses native browser PDF viewer via iframe/object
+ * Uses embed tag for better compatibility with CSP
  */
 
 import { FC, useState } from 'react';
@@ -49,7 +49,7 @@ const PDFViewer: FC<PDFViewerProps> = ({ url, fileName, onClose, onDownload }) =
   // Modal container classes
   const containerClasses = isFullscreen
     ? 'fixed inset-0 z-50 bg-black'
-    : 'fixed inset-4 md:inset-8 lg:inset-16 z-50 bg-white rounded-2xl shadow-2xl overflow-hidden';
+    : 'fixed inset-4 md:inset-8 lg:inset-12 z-50 bg-white rounded-2xl shadow-2xl overflow-hidden';
 
   return (
     <>
@@ -116,10 +116,10 @@ const PDFViewer: FC<PDFViewerProps> = ({ url, fileName, onClose, onDownload }) =
         </div>
 
         {/* PDF Content */}
-        <div className={`relative ${isFullscreen ? 'h-[calc(100vh-56px)]' : 'h-[calc(100%-56px)]'}`}>
+        <div className={`relative ${isFullscreen ? 'h-[calc(100vh-56px)]' : 'h-[calc(100%-56px)]'} bg-gray-200`}>
           {/* Loading state */}
           {isLoading && !hasError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-100 z-10">
               <div className="text-center">
                 <Loader2 className="w-12 h-12 text-primary-600 animate-spin mx-auto mb-4" />
                 <p className="text-gray-600">Chargement du document...</p>
@@ -129,19 +129,19 @@ const PDFViewer: FC<PDFViewerProps> = ({ url, fileName, onClose, onDownload }) =
 
           {/* Error state */}
           {hasError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-100 z-10">
               <div className="text-center max-w-md px-4">
-                <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+                <AlertCircle className="w-16 h-16 text-amber-500 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  Impossible de charger le PDF
+                  Aperçu non disponible
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  Le navigateur ne peut pas afficher ce document. Essayez de le télécharger ou de l'ouvrir dans un nouvel onglet.
+                  Le navigateur ne peut pas afficher ce PDF en aperçu. Veuillez l'ouvrir dans un nouvel onglet ou le télécharger.
                 </p>
                 <div className="flex justify-center gap-3">
                   <button
                     onClick={openInNewTab}
-                    className="btn btn-outline inline-flex items-center gap-2"
+                    className="btn btn-primary inline-flex items-center gap-2"
                   >
                     <ExternalLink className="w-4 h-4" />
                     Ouvrir dans un onglet
@@ -149,7 +149,7 @@ const PDFViewer: FC<PDFViewerProps> = ({ url, fileName, onClose, onDownload }) =
                   {onDownload && (
                     <button
                       onClick={onDownload}
-                      className="btn btn-primary inline-flex items-center gap-2"
+                      className="btn btn-outline inline-flex items-center gap-2"
                     >
                       <Download className="w-4 h-4" />
                       Télécharger
@@ -160,14 +160,23 @@ const PDFViewer: FC<PDFViewerProps> = ({ url, fileName, onClose, onDownload }) =
             </div>
           )}
 
-          {/* PDF iframe - most compatible approach */}
-          <iframe
-            src={`${url}#toolbar=1&navpanes=1&scrollbar=1&view=FitH`}
-            className="w-full h-full border-0"
-            title={fileName}
+          {/* PDF embed - works better with CSP than iframe */}
+          <object
+            data={url}
+            type="application/pdf"
+            className="w-full h-full"
             onLoad={handleLoad}
             onError={handleError}
-          />
+          >
+            {/* Fallback: iframe for browsers that don't support object */}
+            <iframe
+              src={url}
+              className="w-full h-full border-0"
+              title={fileName}
+              onLoad={handleLoad}
+              onError={handleError}
+            />
+          </object>
         </div>
       </div>
     </>

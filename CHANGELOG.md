@@ -13,6 +13,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - 2026-02-13
+
+### ✨ New Features & UI Enhancements
+
+Major feature release with new capabilities for project management and improved user experience.
+
+### Added
+
+#### 🖼️ Photo Albums System
+- New album management for organizing project photos
+- Create, rename, and delete albums
+- Assign photos to albums during upload
+- **New Files:**
+  - `backend/src/controllers/album.controller.ts`
+  - `backend/src/routes/album.routes.ts`
+  - `frontend-web/src/services/albumService.ts`
+
+#### 📋 Enhanced PV System (V2)
+- 8 specialized PV templates:
+  - Installation Chantier
+  - Réunion de Chantier
+  - Constat
+  - Réception Provisoire
+  - Réception Définitive
+  - Arrêt de Travaux
+  - Reprise de Travaux
+  - Autre
+- Dynamic fields per PV type
+- Improved PDF generation (`generatePVPdfV2`)
+- Direct PDF/image upload support
+- **New Files:**
+  - `frontend-web/src/components/project/PVTabV2.tsx`
+
+#### 🖱️ Drag & Drop Upload System
+- Universal drag-and-drop for all file uploads
+- Visual feedback during drag operations
+- Support for Photos, Documents, and PVs
+- **New Files:**
+  - `frontend-web/src/components/common/DropZone.tsx`
+
+#### 🗑️ Delete Métré Feature
+- Ability to delete métré entries with confirmation modal
+- Cascading delete: Période → Décompte → Metres
+- **Safety Check**: Prevents deletion of métrés with validated décomptes
+- Works in both Web (API) and Electron (soft delete) modes
+
+#### 🎨 Login Page Redesign
+- Professional new design with SVG logo
+- Background image from Unsplash
+- Animated banner with business illustrations
+- Responsive design for all screen sizes
+- **New Files:**
+  - `frontend-web/src/styles/login.css`
+
+### Changed
+- `PhotosTab` now uses `PhotosTabV2` component
+- `PVTab` now uses `PVTabV2` component
+- `DocumentsTab` updated to use DropZone component
+- Asset controller enhanced with album support and PV V2
+
+### 🔒 Security
+- Delete Métré checks if décompte is validated before allowing deletion
+- Validated/Paid décomptes cannot be deleted through métré deletion
+
+### 🔒 No Impact On
+- Financial calculations (DecomptCalculator unchanged)
+- Existing décompte/récapitulation data
+- Auto-save behavior for validated décomptes
+- Production database (changes only in dev)
+
+---
+
 ## [1.3.2] - 2026-02-02
 
 ### 🔧 Database Schema Fix - Décompte Creation

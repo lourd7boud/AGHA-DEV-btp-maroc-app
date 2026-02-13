@@ -2,15 +2,16 @@
  * DocumentsTab Component (V2)
  * Upload and display documents for a project
  * Server-first architecture
- * V2: Added inline PDF viewer
+ * V2: Added inline PDF viewer & Drag-Drop support
  */
 
-import { FC, useState, useRef } from 'react';
-import { Paperclip, Upload, Trash2, Download, Loader2, FileText, File, FileSpreadsheet, FileImage, Eye } from 'lucide-react';
+import { FC, useState } from 'react';
+import { Trash2, Download, Loader2, FileText, File, FileSpreadsheet, FileImage, Eye } from 'lucide-react';
 import { assetService, ProjectAsset } from '../../services/assetService';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import PDFViewer from './PDFViewer';
+import DropZone from '../common/DropZone';
 
 interface DocumentsTabProps {
   projectId: string;
@@ -37,38 +38,33 @@ const getFileColor = (mimeType: string) => {
 };
 
 const DocumentsTab: FC<DocumentsTabProps> = ({ projectId, documents, onRefresh }) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [viewingPDF, setViewingPDF] = useState<ProjectAsset | null>(null);
 
-  const handleSelectFile = () => {
-    fileInputRef.current?.click();
-  };
+  const handleDropFiles = async (files: File[]) => {
+    if (files.length === 0) return;
 
-  const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+    // Upload files one by one
     setIsUploading(true);
     setUploadProgress(0);
 
     try {
-      await assetService.uploadDocument(projectId, file, (progress) => {
-        setUploadProgress(progress);
-      });
-      
+      for (let i = 0; i < files.length; i++) {
+        await assetService.uploadDocument(projectId, files[i], (progress) => {
+          // Calculate overall progress
+          const overallProgress = ((i * 100) + progress) / files.length;
+          setUploadProgress(Math.round(overallProgress));
+        });
+      }
       onRefresh();
     } catch (error) {
       console.error('Upload error:', error);
-      alert('Erreur lors du téléchargement du document');
+      alert('Erreur lors du téléchargement des documents');
     } finally {
       setIsUploading(false);
       setUploadProgress(0);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
   };
 
@@ -116,25 +112,22 @@ const DocumentsTab: FC<DocumentsTabProps> = ({ projectId, documents, onRefresh }
   if (documents.length === 0 && !isUploading) {
     return (
       <div className="card">
-        <div className="text-center py-12">
-          <Paperclip className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+        <div className="text-center py-8">
           <h3 className="text-lg font-medium text-gray-900 mb-2">Aucun document</h3>
           <p className="text-gray-600 mb-6">
             Attachez vos factures, plans, et autres documents importants
           </p>
-          <button 
-            onClick={handleSelectFile}
-            className="btn btn-primary inline-flex items-center gap-2"
-          >
-            <Paperclip className="w-4 h-4" />
-            Joindre un document
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
+          
+          {/* Drag & Drop Zone */}
+          <DropZone
+            onFilesSelected={handleDropFiles}
             accept=".pdf,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.png,.jpg,.jpeg"
-            className="hidden"
-            onChange={handleFileSelected}
+            multiple={true}
+            maxFiles={20}
+            icon="document"
+            title="Glissez-déposez vos documents ici"
+            subtitle="PDF, Word, Excel, Images, DWG"
+            disabled={isUploading}
           />
         </div>
       </div>
@@ -143,35 +136,24 @@ const DocumentsTab: FC<DocumentsTabProps> = ({ projectId, documents, onRefresh }
 
   return (
     <div className="space-y-4">
+      {/* Compact Drop Zone */}
+      <DropZone
+        onFilesSelected={handleDropFiles}
+        accept=".pdf,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.png,.jpg,.jpeg"
+        multiple={true}
+        maxFiles={20}
+        icon="document"
+        compact={true}
+        title="Ajouter des documents"
+        subtitle="Glissez-déposez ou cliquez pour sélectionner"
+        disabled={isUploading}
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold text-gray-900">
           Documents ({documents.length})
         </h2>
-        <button
-          onClick={handleSelectFile}
-          disabled={isUploading}
-          className="btn btn-primary inline-flex items-center gap-2"
-        >
-          {isUploading ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {uploadProgress}%
-            </>
-          ) : (
-            <>
-              <Upload className="w-4 h-4" />
-              Joindre un document
-            </>
-          )}
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.png,.jpg,.jpeg"
-          className="hidden"
-          onChange={handleFileSelected}
-        />
       </div>
 
       {/* Upload Progress */}

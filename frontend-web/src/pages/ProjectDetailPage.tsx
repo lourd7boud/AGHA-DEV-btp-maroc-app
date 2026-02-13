@@ -93,6 +93,10 @@ const ProjectDetailPage: FC = () => {
   const [revisionConfig, setRevisionConfig] = useState<ProjectRevisionConfig | null>(null);
   const [_revisionConfigLoading, setRevisionConfigLoading] = useState(false);
 
+  // 🔴 Delete Métré state
+  const [deleteMetreModal, setDeleteMetreModal] = useState<{ open: boolean; periodeId: string | null; numero: number }>({ open: false, periodeId: null, numero: 0 });
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Support both formats: with "project:" prefix and without
   const projectId = id?.startsWith('project:') ? id : `project:${id}`;
   const rawId = id?.startsWith('project:') ? id.replace('project:', '') : id;
@@ -442,6 +446,96 @@ const ProjectDetailPage: FC = () => {
 
     // الانتقال لصفحة تحرير الميتري مع معرف الـ période
     navigate(`/projects/${rawId}/metre/${periodeId.replace('periode:', '')}`);
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 🗑️ DELETE MÉTRÉ HANDLER
+  // ═══════════════════════════════════════════════════════════════════════════
+  const handleDeleteMetre = async () => {
+    if (!deleteMetreModal.periodeId || !user || !rawId) return;
+    if (!canModify) {
+      alert(cannotModifyReason || 'Vous ne pouvez pas modifier les données en mode hors ligne');
+      return;
+    }
+
+    setIsDeleting(true);
+    const periodeId = deleteMetreModal.periodeId;
+    const cleanPeriodeId = periodeId.replace('periode:', '');
+
+    try {
+      // 🔒 CHECK: Vérifier si le décompte est validé AVANT de supprimer
+      const relatedDecompt = (decompts || []).find((d: any) => {
+        const decomptCleanPeriodeId = (d.periodeId || '').replace('periode:', '');
+        return decomptCleanPeriodeId === cleanPeriodeId;
+      });
+
+      // Vérifier si le décompte est validé (statut = 'validated' ou 'paid')
+      const isDecomptValidated = relatedDecompt?.statut === 'validated' || relatedDecompt?.statut === 'paid';
+      if (isDecomptValidated) {
+        alert('⚠️ Impossible de supprimer ce métré : Le décompte associé est déjà validé.\n\nPour supprimer ce métré, vous devez d\'abord annuler la validation du décompte.');
+        setIsDeleting(false);
+        setDeleteMetreModal({ open: false, periodeId: null, numero: 0 });
+        return;
+      }
+
+      if (isWeb()) {
+        // 🌐 Web: استخدام API
+        // 1. حذف جميع الـ metres المرتبطة بهذه الـ période
+        const relatedMetres = (metres || []).filter((m: any) => {
+          const metreCleanPeriodeId = (m.periodeId || '').replace('periode:', '');
+          return metreCleanPeriodeId === cleanPeriodeId;
+        });
+
+        for (const metre of relatedMetres) {
+          const metreId = (metre.id || '').replace('metre:', '');
+          await apiService.deleteMetre(metreId);
+        }
+
+        // 2. حذف الـ décompte المرتبط (غير مصادق عليه - تم التحقق أعلاه)
+        if (relatedDecompt) {
+          const decomptId = (relatedDecompt.id || '').replace('decompt:', '');
+          await apiService.deleteDecompt(decomptId);
+        }
+
+        // 3. حذف الـ période نفسها
+        await apiService.deletePeriode(cleanPeriodeId);
+
+        // تحديث البيانات
+        refreshPeriodes();
+        refreshDecompts();
+
+        console.log('[handleDeleteMetre] Successfully deleted métré N°', deleteMetreModal.numero);
+      } else {
+        // 🖥️ Electron: Soft delete
+        const now = new Date().toISOString();
+
+        // Soft delete metres
+        const relatedMetres = await db.metres.where('periodeId').anyOf([periodeId, cleanPeriodeId]).toArray();
+        for (const metre of relatedMetres) {
+          await db.metres.update(metre.id!, { deletedAt: now, updatedAt: now });
+          await logSyncOperation('DELETE', 'metre', metre.id!.replace('metre:', ''), { deletedAt: now }, user.id);
+        }
+
+        // Soft delete décompte (غير مصادق عليه - تم التحقق أعلاه)
+        const relatedDecomptLocal = await db.decompts.where('periodeId').anyOf([periodeId, cleanPeriodeId]).first();
+        if (relatedDecomptLocal) {
+          await db.decompts.update(relatedDecomptLocal.id!, { deletedAt: now, updatedAt: now });
+          await logSyncOperation('DELETE', 'decompt', relatedDecomptLocal.id!.replace('decompt:', ''), { deletedAt: now }, user.id);
+        }
+
+        // Soft delete période
+        await db.periodes.update(periodeId, { deletedAt: now, updatedAt: now });
+        await logSyncOperation('DELETE', 'periode', cleanPeriodeId, { deletedAt: now }, user.id);
+      }
+
+      // إغلاق الـ modal
+      setDeleteMetreModal({ open: false, periodeId: null, numero: 0 });
+    } catch (error: any) {
+      console.error('[handleDeleteMetre] Error:', error);
+      alert('Erreur lors de la suppression: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // Handle loading state - show error after timeout if no data
@@ -1097,6 +1191,18 @@ const ProjectDetailPage: FC = () => {
                                   </p>
                                 </div>
                                 
+                                {/* Delete Button */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteMetreModal({ open: true, periodeId: periode.id, numero: periode.numero });
+                                  }}
+                                  className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="Supprimer ce métré"
+                                >
+                                  <Trash2 className="w-5 h-5" />
+                                </button>
+                                
                                 <ChevronRight className="w-5 h-5 text-gray-400" />
                               </div>
                             </div>
@@ -1387,6 +1493,62 @@ const ProjectDetailPage: FC = () => {
           onClose={() => setCreateMode(null)}
           onImported={() => setCreateMode(null)}
         />
+      )}
+
+      {/* Delete Métré Confirmation Modal */}
+      {deleteMetreModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+                <Trash2 className="w-6 h-6 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Supprimer le Métré N° {deleteMetreModal.numero}
+                </h3>
+                <p className="text-sm text-gray-500">Cette action est irréversible</p>
+              </div>
+            </div>
+            
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+              <p className="text-sm text-yellow-800">
+                <strong>⚠️ Attention :</strong> La suppression de ce métré supprimera également :
+              </p>
+              <ul className="text-sm text-yellow-700 mt-2 list-disc list-inside">
+                <li>Tous les articles mesurés dans ce métré</li>
+                <li>Le décompte associé à cette période</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setDeleteMetreModal({ open: false, periodeId: null, numero: 0 })}
+                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                disabled={isDeleting}
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleDeleteMetre}
+                disabled={isDeleting}
+                className="px-4 py-2 text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors flex items-center gap-2"
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Suppression...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Supprimer
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -36,6 +36,7 @@ import assetRoutes from './routes/asset.routes';
 import healthRoutes from './routes/health.routes';
 import revisionRoutes from './routes/revision.routes';
 import indexManagementRoutes from './routes/indexManagement.routes';
+import albumRoutes from './routes/album.routes';
 
 console.log('✅ All routes imported successfully');
 
@@ -86,6 +87,7 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/revision', revisionRoutes);
 app.use('/api/index-management', indexManagementRoutes);
+app.use('/api/albums', albumRoutes);
 
 // Error handling
 app.use(notFound);

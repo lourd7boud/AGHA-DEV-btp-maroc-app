@@ -13,6 +13,7 @@ import {
   uploadAsset,
   uploadMultiplePhotos,
   createPV,
+  uploadPV,
   deleteAsset,
   getAssetCounts,
 } from '../controllers/asset.controller';
@@ -97,6 +98,13 @@ router.post('/project/:projectId/photos', upload.array('files', 50), uploadMulti
  * Body: pvType, date, observations?, participants?
  */
 router.post('/project/:projectId/pv', createPV);
+
+/**
+ * POST /api/assets/project/:projectId/pv/upload
+ * Upload PV files (PDF or images)
+ * Body: pvType, date?, description?, files (multipart)
+ */
+router.post('/project/:projectId/pv/upload', upload.array('files', 10), uploadPV);
 
 /**
  * DELETE /api/assets/:assetId
