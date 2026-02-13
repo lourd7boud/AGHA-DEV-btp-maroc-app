@@ -7,7 +7,7 @@
  * ⚠️ IMPORTANT: No business logic here - this is just a wrapper!
  */
 
-import { app, BrowserWindow, shell, ipcMain, dialog, nativeTheme } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, dialog, nativeTheme, screen, globalShortcut } from 'electron';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import log from 'electron-log';
@@ -49,14 +49,26 @@ async function createWindow(): Promise<void> {
     log.error(`Preload script not found at: ${preloadPath}`);
   }
 
+  // Get primary display dimensions for responsive window size
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+  
+  // Calculate optimal window size (85% of screen, with min/max limits)
+  const windowWidth = Math.min(Math.max(Math.round(screenWidth * 0.85), 1024), 1920);
+  const windowHeight = Math.min(Math.max(Math.round(screenHeight * 0.85), 700), 1080);
+  
+  log.info(`Screen size: ${screenWidth}x${screenHeight}`);
+  log.info(`Window size: ${windowWidth}x${windowHeight}`);
+
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    width: windowWidth,
+    height: windowHeight,
     minWidth: 1024,
-    minHeight: 768,
+    minHeight: 700,
     title: 'BTP Desktop',
     icon: join(__dirname, '../../resources/icon.png'),
     show: false, // Don't show until ready
+    center: true, // Center the window on screen
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1a1a2e' : '#ffffff',
     webPreferences: {
       preload: preloadPath,
@@ -65,13 +77,32 @@ async function createWindow(): Promise<void> {
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
+      zoomFactor: 1.0, // Start with 100% zoom
     },
   });
 
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
     log.info('Window ready to show');
+    
+    // Auto-adjust zoom based on screen DPI/scale factor
+    const scaleFactor = primaryDisplay.scaleFactor;
+    log.info(`Display scale factor: ${scaleFactor}`);
+    
+    // Adjust zoom for high DPI displays
+    if (scaleFactor > 1.25) {
+      const adjustedZoom = 1 / scaleFactor * 1.1; // Slight boost for readability
+      mainWindow?.webContents.setZoomFactor(Math.max(adjustedZoom, 0.8));
+      log.info(`Adjusted zoom factor: ${adjustedZoom}`);
+    }
+    
     mainWindow?.show();
+    
+    // Maximize on smaller screens for better usability
+    if (screenWidth <= 1366 || screenHeight <= 768) {
+      mainWindow?.maximize();
+      log.info('Maximized window for small screen');
+    }
     
     // Focus the window
     if (mainWindow?.isMinimized()) {
@@ -125,6 +156,27 @@ async function createWindow(): Promise<void> {
       log.info(`Preventing navigation to: ${url}`);
       event.preventDefault();
       shell.openExternal(url);
+    }
+  });
+
+  // Register zoom shortcuts
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.control || input.meta) {
+      if (input.key === '=' || input.key === '+') {
+        // Zoom in: Ctrl/Cmd + =
+        const currentZoom = mainWindow?.webContents.getZoomFactor() || 1;
+        mainWindow?.webContents.setZoomFactor(Math.min(currentZoom + 0.1, 2.0));
+        event.preventDefault();
+      } else if (input.key === '-') {
+        // Zoom out: Ctrl/Cmd + -
+        const currentZoom = mainWindow?.webContents.getZoomFactor() || 1;
+        mainWindow?.webContents.setZoomFactor(Math.max(currentZoom - 0.1, 0.5));
+        event.preventDefault();
+      } else if (input.key === '0') {
+        // Reset zoom: Ctrl/Cmd + 0
+        mainWindow?.webContents.setZoomFactor(1.0);
+        event.preventDefault();
+      }
     }
   });
 
