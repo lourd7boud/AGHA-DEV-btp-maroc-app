@@ -51,6 +51,16 @@ export const createDecompt = async (
       throw new ApiError('Project not found or not authorized', 404);
     }
 
+    // 🔒 Check for duplicate: prevent duplicate decompt with same numero for same project
+    const duplicateCheck = await pool.query(
+      'SELECT id FROM decompts WHERE project_id = $1 AND numero = $2 AND deleted_at IS NULL',
+      [projectId, numero]
+    );
+
+    if (duplicateCheck.rows.length > 0) {
+      throw new ApiError(`Un décompte N°${numero} existe déjà pour ce projet. Veuillez utiliser un numéro différent.`, 409);
+    }
+
     const result = await pool.query(
       `INSERT INTO decompts (
         id, project_id, periode_id, numero, date_decompte, 

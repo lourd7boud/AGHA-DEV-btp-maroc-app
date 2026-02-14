@@ -1272,9 +1272,11 @@ const MetrePage: FC = () => {
       await refreshDecompts();
       
       alert('✅ Métrés et Décompte enregistrés avec succès !');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erreur lors de la sauvegarde:', error);
-      alert('❌ Erreur lors de la sauvegarde des métrés');
+      // 🔒 Afficher le message d'erreur du serveur si disponible (ex: duplicate numero)
+      const errorMessage = error?.response?.data?.message || error?.message || 'Erreur lors de la sauvegarde des métrés';
+      alert(`❌ ${errorMessage}`);
     } finally {
       setIsSaving(false);
     }

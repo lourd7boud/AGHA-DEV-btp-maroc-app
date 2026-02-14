@@ -151,6 +151,16 @@ export const createPeriode = async (
       throw new ApiError('Project not found or not authorized', 404);
     }
 
+    // 🔒 Check for duplicate: prevent duplicate periode with same numero for same project
+    const duplicateCheck = await pool.query(
+      'SELECT id FROM periodes WHERE project_id = $1 AND numero = $2 AND deleted_at IS NULL',
+      [projectId, numero]
+    );
+
+    if (duplicateCheck.rows.length > 0) {
+      throw new ApiError(`Une période/métré N°${numero} existe déjà pour ce projet. Veuillez utiliser un numéro différent.`, 409);
+    }
+
     const result = await pool.query(
       `INSERT INTO periodes (
         project_id, user_id, numero, libelle, date_debut, date_fin, statut, is_decompte_dernier
