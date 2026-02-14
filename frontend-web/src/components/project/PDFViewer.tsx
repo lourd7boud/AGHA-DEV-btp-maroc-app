@@ -2,9 +2,10 @@
  * PDFViewer Component (V2)
  * Display PDF files inline without downloading
  * Uses embed tag for better compatibility with CSP
+ * Enhanced for Electron desktop app compatibility
  */
 
-import { FC, useState } from 'react';
+import { FC, useState, useEffect } from 'react';
 import { 
   X, 
   Maximize2, 
@@ -27,6 +28,40 @@ const PDFViewer: FC<PDFViewerProps> = ({ url, fileName, onClose, onDownload }) =
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+
+  // For Electron: fetch PDF and create blob URL to avoid CORS/CSP issues
+  useEffect(() => {
+    const isElectron = typeof window !== 'undefined' && (window as any).electronAPI?.isElectron;
+    
+    if (isElectron && url.startsWith('http')) {
+      // Fetch PDF as blob for Electron
+      fetch(url)
+        .then(response => {
+          if (!response.ok) throw new Error('Failed to fetch PDF');
+          return response.blob();
+        })
+        .then(blob => {
+          const blobUrl = URL.createObjectURL(blob);
+          setPdfBlobUrl(blobUrl);
+          setIsLoading(false);
+        })
+        .catch(() => {
+          setHasError(true);
+          setIsLoading(false);
+        });
+    } else {
+      // For web, use URL directly
+      setPdfBlobUrl(url);
+    }
+
+    // Cleanup blob URL on unmount
+    return () => {
+      if (pdfBlobUrl && pdfBlobUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(pdfBlobUrl);
+      }
+    };
+  }, [url]);
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
@@ -160,23 +195,25 @@ const PDFViewer: FC<PDFViewerProps> = ({ url, fileName, onClose, onDownload }) =
             </div>
           )}
 
-          {/* PDF embed - works better with CSP than iframe */}
-          <object
-            data={url}
-            type="application/pdf"
-            className="w-full h-full"
-            onLoad={handleLoad}
-            onError={handleError}
-          >
-            {/* Fallback: iframe for browsers that don't support object */}
-            <iframe
-              src={url}
-              className="w-full h-full border-0"
-              title={fileName}
+          {/* PDF embed - uses blob URL for Electron compatibility */}
+          {pdfBlobUrl && !hasError && (
+            <object
+              data={pdfBlobUrl}
+              type="application/pdf"
+              className="w-full h-full"
               onLoad={handleLoad}
               onError={handleError}
-            />
-          </object>
+            >
+              {/* Fallback: iframe for browsers that don't support object */}
+              <iframe
+                src={pdfBlobUrl}
+                className="w-full h-full border-0"
+                title={fileName}
+                onLoad={handleLoad}
+                onError={handleError}
+              />
+            </object>
+          )}
         </div>
       </div>
     </>

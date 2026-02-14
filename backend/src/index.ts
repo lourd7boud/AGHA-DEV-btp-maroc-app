@@ -46,10 +46,12 @@ const app: Express = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-// Configure helmet with relaxed settings for cross-origin resource access
+// Configure helmet with relaxed settings for cross-origin resource access and PDF embedding
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allow cross-origin access to resources
   crossOriginEmbedderPolicy: false, // Disable COEP for PDF embedding
+  crossOriginOpenerPolicy: false, // Disable COOP for Electron compatibility
+  xFrameOptions: false, // Let nginx handle X-Frame-Options for PDF embedding
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -58,9 +60,10 @@ app.use(helmet({
       imgSrc: ["'self'", "data:", "blob:", "https:"],
       fontSrc: ["'self'", "https:", "data:"],
       connectSrc: ["'self'", "https:", "wss:"],
-      frameSrc: ["'self'", "blob:"],
+      frameSrc: ["'self'", "blob:", "https:"],
       objectSrc: ["'self'", "blob:"],
       mediaSrc: ["'self'", "blob:"],
+      frameAncestors: ["'self'", "file:", "https:", "*"], // Allow embedding in Electron (file://)
     },
   },
 }));
@@ -77,11 +80,17 @@ app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 // Ensure JSON responses for all API routes
 app.use(ensureJsonResponse);
 
-// Static files (uploads) - with permissive CORS headers for Electron app
+// Static files (uploads) - with permissive headers for Electron app
 app.use('/uploads', (req, res, next) => {
   // Allow cross-origin access for Electron app
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  
+  // Remove restrictive headers for PDF/file embedding in Electron
+  res.removeHeader('Content-Security-Policy');
+  res.setHeader('X-Frame-Options', 'ALLOWALL');
+  res.setHeader('Content-Security-Policy', 'frame-ancestors *');
+  
   next();
 }, express.static('uploads'));
 
