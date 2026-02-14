@@ -1348,19 +1348,36 @@ const MetrePage: FC = () => {
   const getTotalGeneralTTC = () => {
     if (!allDecompts || allDecompts.length === 0) return 0;
     
-    // إيجاد آخر ديكونت (الأعلى رقماً) - يحتوي على القيم التراكمية
-    const dernierDecompte = allDecompts.reduce((latest: any, d: any) => {
-      if (!latest || d.numero > latest.numero) return d;
-      return latest;
-    }, allDecompts[0]);
+    // 🔧 FIX: إيجاد آخر ديكونت (الأعلى رقماً) الذي يحتوي على قيم فعلية
+    // قد تكون هناك ديكونتات مكررة بنفس الرقم بعضها فارغ
+    const maxNumero = Math.max(...allDecompts.map((d: any) => d.numero || 0));
+    
+    // تصفية الديكونتات بالرقم الأعلى
+    const decomptesWithMaxNumero = allDecompts.filter((d: any) => d.numero === maxNumero);
+    
+    // اختيار الديكونت الذي يحتوي على قيم (ليس فارغاً)
+    const dernierDecompte = decomptesWithMaxNumero.reduce((best: any, d: any) => {
+      const dValue = Number(d.totalGeneralTtc || d.totalTtc || d.montantTotal || d.montantCumule || 0);
+      const bestValue = Number(best?.totalGeneralTtc || best?.totalTtc || best?.montantTotal || best?.montantCumule || 0);
+      return dValue > bestValue ? d : best;
+    }, decomptesWithMaxNumero[0]);
     
     // 🔧 استخدام totalGeneralTtc (snake_case -> camelCase من Backend)
     // Backend يحول total_general_ttc إلى totalGeneralTtc
-    const value = dernierDecompte?.totalGeneralTtc || dernierDecompte?.totalTtc || 0;
+    // ⚠️ FIX: إضافة montantTotal و montantCumule كـ fallback للديكونتات القديمة
+    const value = dernierDecompte?.totalGeneralTtc || 
+                  dernierDecompte?.totalTtc || 
+                  dernierDecompte?.montantTotal ||
+                  dernierDecompte?.montantCumule ||
+                  0;
     console.log('[getTotalGeneralTTC] Dernier décompte:', {
+      maxNumero,
+      decomptesCount: decomptesWithMaxNumero.length,
       numero: dernierDecompte?.numero,
       totalGeneralTtc: dernierDecompte?.totalGeneralTtc,
       totalTtc: dernierDecompte?.totalTtc,
+      montantTotal: dernierDecompte?.montantTotal,
+      montantCumule: dernierDecompte?.montantCumule,
       valueUsed: value
     });
     return Number(value);

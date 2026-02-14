@@ -172,11 +172,16 @@ const ProjectDetailPage: FC = () => {
     if (!decompts || decompts.length === 0 || montantTTC === 0) return 0;
     
     // 🔧 FIX: استخدام totalGeneralTtc من آخر ديكونت (لأن كل ديكونت تراكمي)
-    // إيجاد آخر ديكونت (الأعلى رقماً)
-    const dernierDecompte = decompts.reduce((latest: any, d: any) => {
-      if (!latest || d.numero > latest.numero) return d;
-      return latest;
-    }, decompts[0]);
+    // 🔧 FIX: قد تكون هناك ديكونتات مكررة بنفس الرقم - نختار الذي يحتوي على قيم
+    const maxNumero = Math.max(...decompts.map((d: any) => d.numero || 0));
+    const decomptesWithMaxNumero = decompts.filter((d: any) => d.numero === maxNumero);
+    
+    // اختيار الديكونت الذي يحتوي على قيم (ليس فارغاً)
+    const dernierDecompte = decomptesWithMaxNumero.reduce((best: any, d: any) => {
+      const dValue = Number(d.totalGeneralTtc || d.totalTtc || d.montantTotal || d.montantCumule || 0);
+      const bestValue = Number(best?.totalGeneralTtc || best?.totalTtc || best?.montantTotal || best?.montantCumule || 0);
+      return dValue > bestValue ? d : best;
+    }, decomptesWithMaxNumero[0]);
     
     // 🔧 Backend يحول total_general_ttc إلى totalGeneralTtc (camelCase)
     // ⚠️ FIX: إضافة montantTotal كـ fallback لأن بعض الديكونتات القديمة تستخدمه
@@ -190,6 +195,8 @@ const ProjectDetailPage: FC = () => {
     
     console.log('[PROGRESS] Calcul (dernier décompte cumulatif):', {
       nombreDecomptes: decompts.length,
+      maxNumero,
+      decomptesWithMaxNumeroCount: decomptesWithMaxNumero.length,
       dernierDecompteNumero: dernierDecompte?.numero,
       totalGeneralTtc: dernierDecompte?.totalGeneralTtc,
       totalTtc: dernierDecompte?.totalTtc,

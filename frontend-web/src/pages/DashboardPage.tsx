@@ -168,11 +168,17 @@ const DashboardPage: FC = () => {
       }) || [];
       
       // ⚠️ FIX: Prendre uniquement le dernier décompte (les décomptes sont cumulatifs)
+      // 🔧 FIX: قد تكون هناك ديكونتات مكررة بنفس الرقم - نختار الذي يحتوي على قيم
       if (projectDecompts.length > 0) {
-        const dernierDecompte = projectDecompts.reduce((latest: any, d: any) => {
-          if (!latest || (d.numero || 0) > (latest.numero || 0)) return d;
-          return latest;
-        }, projectDecompts[0]);
+        const maxNumero = Math.max(...projectDecompts.map((d: any) => d.numero || 0));
+        const decomptesWithMaxNumero = projectDecompts.filter((d: any) => d.numero === maxNumero);
+        
+        // اختيار الديكونت الذي يحتوي على قيم (ليس فارغاً)
+        const dernierDecompte = decomptesWithMaxNumero.reduce((best: any, d: any) => {
+          const dValue = Number(d.totalGeneralTtc || d.totalTtc || d.montantTotal || d.montantCumule || 0);
+          const bestValue = Number(best?.totalGeneralTtc || best?.totalTtc || best?.montantTotal || best?.montantCumule || 0);
+          return dValue > bestValue ? d : best;
+        }, decomptesWithMaxNumero[0]);
         
         // Utiliser totalGeneralTtc > totalTtc > montantTotal > montantCumule comme fallback
         const projectRealizedTTC = Number(
@@ -378,12 +384,19 @@ const DashboardPage: FC = () => {
         
         // Calculer le montant réalisé depuis le DERNIER décompte (cumulatif)
         // ⚠️ FIX: Ne pas sommer tous les décomptes - prendre uniquement le dernier
+        // 🔧 FIX: قد تكون هناك ديكونتات مكررة بنفس الرقم - نختار الذي يحتوي على قيم
         let montantRealise = 0;
         if (projectDecompts.length > 0) {
-          const dernierDecompte = projectDecompts.reduce((latest: any, d: any) => {
-            if (!latest || (d.numero || 0) > (latest.numero || 0)) return d;
-            return latest;
-          }, projectDecompts[0]);
+          const maxNumero = Math.max(...projectDecompts.map((d: any) => d.numero || 0));
+          const decomptesWithMaxNumero = projectDecompts.filter((d: any) => d.numero === maxNumero);
+          
+          // اختيار الديكونت الذي يحتوي على قيم (ليس فارغاً)
+          const dernierDecompte = decomptesWithMaxNumero.reduce((best: any, d: any) => {
+            const dValue = Number(d.totalGeneralTtc || d.totalTtc || d.montantTotal || d.montantCumule || 0);
+            const bestValue = Number(best?.totalGeneralTtc || best?.totalTtc || best?.montantTotal || best?.montantCumule || 0);
+            return dValue > bestValue ? d : best;
+          }, decomptesWithMaxNumero[0]);
+          
           montantRealise = Number(
             dernierDecompte?.totalGeneralTtc || 
             dernierDecompte?.totalTtc || 
