@@ -176,15 +176,29 @@ class AssetService {
    * Get full URL for an asset
    */
   getAssetUrl(storagePath: string): string {
-    // In production, storagePath is like /uploads/...
-    // The server serves static files at /uploads
+    // If already a full URL, return as-is
     if (storagePath.startsWith('http')) {
       return storagePath;
     }
     
-    // For relative paths, prepend the API base URL
-    const baseUrl = window.location.origin;
-    return `${baseUrl}${storagePath}`;
+    // Ensure path starts with /
+    const normalizedPath = storagePath.startsWith('/') ? storagePath : `/${storagePath}`;
+    
+    // For Electron, use the API URL from electronAPI
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.isElectron) {
+      const electronApiUrl = (window as any).electronAPI.apiUrl || 'https://marocinfra.com';
+      // Remove duplicate /uploads if present
+      const cleanPath = normalizedPath.replace(/^\/+uploads\/+uploads/, '/uploads');
+      return `${electronApiUrl}${cleanPath}`;
+    }
+    
+    // For web, use the current origin
+    if (typeof window !== 'undefined' && window.location.protocol !== 'file:') {
+      return `${window.location.origin}${normalizedPath}`;
+    }
+    
+    // Fallback for SSR or other contexts
+    return normalizedPath;
   }
 
   /**
