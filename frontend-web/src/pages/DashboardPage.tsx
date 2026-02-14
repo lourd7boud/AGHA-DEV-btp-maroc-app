@@ -161,15 +161,29 @@ const DashboardPage: FC = () => {
       }, 0);
       totalBudget += projectBudgetTTC;
       
-      // Réalisé: calculer depuis les décomptes du projet
+      // Réalisé: prendre le dernier décompte (cumulatif) du projet
       const projectDecompts = decompts?.filter((d: any) => {
         const dProjectId = (d.projectId || d.project_id)?.replace('project:', '') || d.projectId;
         return dProjectId === cleanProjectId || d.projectId === project.id;
       }) || [];
-      const projectRealizedTTC = projectDecompts.reduce((sum: number, d: any) => {
-        return sum + (Number(d.totalTTC || d.total_ttc) || Number(d.montantTotal || d.montant_total) || 0);
-      }, 0);
-      totalRealized += projectRealizedTTC;
+      
+      // ⚠️ FIX: Prendre uniquement le dernier décompte (les décomptes sont cumulatifs)
+      if (projectDecompts.length > 0) {
+        const dernierDecompte = projectDecompts.reduce((latest: any, d: any) => {
+          if (!latest || (d.numero || 0) > (latest.numero || 0)) return d;
+          return latest;
+        }, projectDecompts[0]);
+        
+        // Utiliser totalGeneralTtc > totalTtc > montantTotal > montantCumule comme fallback
+        const projectRealizedTTC = Number(
+          dernierDecompte?.totalGeneralTtc || 
+          dernierDecompte?.totalTtc || 
+          dernierDecompte?.montantTotal ||
+          dernierDecompte?.montantCumule ||
+          0
+        );
+        totalRealized += projectRealizedTTC;
+      }
     }
 
     // Calculer la progression = (Réalisé / Budget) × 100
@@ -362,10 +376,22 @@ const DashboardPage: FC = () => {
           return sum + montantHT * 1.2; // HT * 1.2 = TTC (TVA 20%)
         }, 0);
         
-        // Calculer le montant réalisé depuis les décomptes de ce projet
-        const montantRealise = projectDecompts.reduce((sum, d) => {
-          return sum + (Number(d.totalTTC) || Number(d.montantTotal) || 0);
-        }, 0);
+        // Calculer le montant réalisé depuis le DERNIER décompte (cumulatif)
+        // ⚠️ FIX: Ne pas sommer tous les décomptes - prendre uniquement le dernier
+        let montantRealise = 0;
+        if (projectDecompts.length > 0) {
+          const dernierDecompte = projectDecompts.reduce((latest: any, d: any) => {
+            if (!latest || (d.numero || 0) > (latest.numero || 0)) return d;
+            return latest;
+          }, projectDecompts[0]);
+          montantRealise = Number(
+            dernierDecompte?.totalGeneralTtc || 
+            dernierDecompte?.totalTtc || 
+            dernierDecompte?.montantTotal ||
+            dernierDecompte?.montantCumule ||
+            0
+          );
+        }
         
         let urgency = 'normal';
         let reason = '';

@@ -179,13 +179,22 @@ const ProjectDetailPage: FC = () => {
     }, decompts[0]);
     
     // 🔧 Backend يحول total_general_ttc إلى totalGeneralTtc (camelCase)
-    const montantCumulTTC = Number(dernierDecompte?.totalGeneralTtc || dernierDecompte?.totalTtc || 0);
+    // ⚠️ FIX: إضافة montantTotal كـ fallback لأن بعض الديكونتات القديمة تستخدمه
+    const montantCumulTTC = Number(
+      dernierDecompte?.totalGeneralTtc || 
+      dernierDecompte?.totalTtc || 
+      dernierDecompte?.montantTotal ||
+      dernierDecompte?.montantCumule ||
+      0
+    );
     
     console.log('[PROGRESS] Calcul (dernier décompte cumulatif):', {
       nombreDecomptes: decompts.length,
       dernierDecompteNumero: dernierDecompte?.numero,
       totalGeneralTtc: dernierDecompte?.totalGeneralTtc,
       totalTtc: dernierDecompte?.totalTtc,
+      montantTotal: dernierDecompte?.montantTotal,
+      montantCumule: dernierDecompte?.montantCumule,
       montantCumulTTC,
       montantMarcheTTC: montantTTC,
       progress: (montantCumulTTC / montantTTC) * 100
