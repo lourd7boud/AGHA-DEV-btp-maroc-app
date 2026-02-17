@@ -27,8 +27,9 @@ services:
       - REDIS_HOST=btp-redis
       - REDIS_PORT=6379
       - JWT_SECRET=BtpJwtSecretKeyStaging2025!
+      - JWT_REFRESH_SECRET=BtpRefreshSecretKeyStaging2025!
       - JWT_EXPIRES_IN=1d
-      - CORS_ORIGIN=*
+      - CORS_ORIGIN=https://dev.marocinfra.com,http://dev.marocinfra.com,http://localhost:5173
     volumes:
       - ./backend/uploads:/app/uploads
     networks:
