@@ -3,38 +3,10 @@ import { getPool } from '../config/postgres';
 import { ApiError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import logger from '../utils/logger';
+import { keysToCamel } from '../utils/transform';
 
-/**
- * Convert snake_case to camelCase for API response
- */
-const snakeToCamel = (obj: any): any => {
-  if (obj === null || obj === undefined) return obj;
-  if (Array.isArray(obj)) return obj.map(snakeToCamel);
-  
-  if (obj instanceof Date) {
-    return obj.toISOString();
-  }
-  
-  if (typeof obj !== 'object') return obj;
-  
-  const newObj: any = {};
-  for (const key in obj) {
-    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-    let value = obj[key];
-    
-    if (value instanceof Date) {
-      value = value.toISOString();
-    } else if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(value)) {
-      const date = new Date(value);
-      if (!isNaN(date.getTime())) {
-        value = date.toISOString();
-      }
-    }
-    
-    newObj[camelKey] = snakeToCamel(value);
-  }
-  return newObj;
-};
+// Use canonical keysToCamel (was duplicated here)
+const snakeToCamel = keysToCamel;
 
 /**
  * Get all periodes for a project

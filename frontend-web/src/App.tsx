@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from './store/authStore';
@@ -6,31 +6,39 @@ import { useSyncManager } from './hooks/useSyncManager';
 import { useAutoUpdater } from './hooks/useAutoUpdater';
 import { isWeb, isElectron } from './utils/platform';
 
-// Pages
+// Eagerly loaded pages (critical path)
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import ProjectsPage from './pages/ProjectsPage';
-import ProjectDetailPage from './pages/ProjectDetailPage';
-import CreateProjectPage from './pages/CreateProjectPage';
-import EditProjectPage from './pages/EditProjectPage';
-import DelaisPage from './pages/DelaisPage';
-import BordereauPage from './pages/BordereauPage';
-// Main pages
-import MetrePage from './pages/MetrePage';
-import PeriodeDecomptePage from './pages/PeriodeDecomptePage';
-import AttachementPage from './pages/AttachementPage';
-import SettingsPage from './pages/SettingsPage';
-import AdminDashboardPage from './pages/AdminDashboardPage';
-import UsersManagementPage from './pages/UsersManagementPage';
-import TrashPage from './pages/TrashPage';
-// Price Revision Phase 2
-import RevisionIndexesPage from './pages/RevisionIndexesPage';
-// Phase 4B: Index Management
-import IndexManagementPage from './pages/revision/IndexManagementPage';
+
+// Phase 2: Lazy-loaded pages (code splitting)
+const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
+const CreateProjectPage = lazy(() => import('./pages/CreateProjectPage'));
+const EditProjectPage = lazy(() => import('./pages/EditProjectPage'));
+const DelaisPage = lazy(() => import('./pages/DelaisPage'));
+const BordereauPage = lazy(() => import('./pages/BordereauPage'));
+const MetrePage = lazy(() => import('./pages/MetrePage'));
+const PeriodeDecomptePage = lazy(() => import('./pages/PeriodeDecomptePage'));
+const AttachementPage = lazy(() => import('./pages/AttachementPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage'));
+const UsersManagementPage = lazy(() => import('./pages/UsersManagementPage'));
+const TrashPage = lazy(() => import('./pages/TrashPage'));
+const RevisionIndexesPage = lazy(() => import('./pages/RevisionIndexesPage'));
+const IndexManagementPage = lazy(() => import('./pages/revision/IndexManagementPage'));
+
+// Components
 import Layout from './components/Layout';
 import SyncIndicator from './components/SyncIndicator';
 import { UpdateNotification } from './components/UpdateNotification';
+
+// Loading fallback for lazy pages
+const PageLoader = () => (
+  <div className="flex items-center justify-center min-h-screen">
+    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+  </div>
+);
 
 function App() {
   useTranslation(); // Initialize i18n
@@ -156,6 +164,7 @@ function App() {
         onClearPending={isElectron() ? clearPendingOperations : undefined}
       />
       <UpdateNotification />
+      <Suspense fallback={<PageLoader />}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
@@ -476,6 +485,7 @@ function App() {
         
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
     </>
   );
 }

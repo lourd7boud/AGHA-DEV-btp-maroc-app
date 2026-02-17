@@ -10,6 +10,8 @@ import {
   deleteUser
 } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth';
+import { validate } from '../middleware/validate';
+import { loginSchema, registerSchema, createUserSchema, updateUserSchema, refreshTokenSchema } from '../middleware/schemas';
 
 const router = Router();
 
@@ -18,14 +20,14 @@ const router = Router();
  * @desc    Register new user
  * @access  Public
  */
-router.post('/register', register);
+router.post('/register', validate({ body: registerSchema }), register);
 
 /**
  * @route   POST /api/auth/login
  * @desc    Login user
  * @access  Public
  */
-router.post('/login', login);
+router.post('/login', validate({ body: loginSchema }), login);
 
 /**
  * @route   GET /api/auth/me
@@ -39,7 +41,7 @@ router.get('/me', authenticate, getCurrentUser);
  * @desc    Refresh access token
  * @access  Public
  */
-router.post('/refresh', refreshToken);
+router.post('/refresh', validate({ body: refreshTokenSchema }), refreshToken);
 
 /**
  * @route   GET /api/auth/users
@@ -53,14 +55,14 @@ router.get('/users', authenticate, getAllUsers);
  * @desc    Create user (admin only)
  * @access  Private
  */
-router.post('/users', authenticate, createUser);
+router.post('/users', authenticate, validate({ body: createUserSchema }), createUser);
 
 /**
  * @route   PUT /api/auth/users/:id
  * @desc    Update user (admin only)
  * @access  Private
  */
-router.put('/users/:id', authenticate, updateUser);
+router.put('/users/:id', authenticate, validate({ body: updateUserSchema }), updateUser);
 
 /**
  * @route   DELETE /api/auth/users/:id

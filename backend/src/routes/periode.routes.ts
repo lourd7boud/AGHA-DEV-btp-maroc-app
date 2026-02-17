@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
+import { validate } from '../middleware/validate';
+import { createPeriodeSchema, idParamSchema, projectIdParamSchema } from '../middleware/schemas';
 import {
   createPeriode,
   getPeriodes,
@@ -11,11 +13,11 @@ import {
 const router = Router();
 router.use(authenticate);
 
-router.post('/', createPeriode);
-router.post('/project/:projectId', createPeriode); // Alternative route for frontend compatibility
-router.get('/project/:projectId', getPeriodes);
-router.get('/:id', getPeriodeById);
-router.put('/:id', updatePeriode);
-router.delete('/:id', deletePeriode);
+router.post('/', validate({ body: createPeriodeSchema }), createPeriode);
+router.post('/project/:projectId', validate({ body: createPeriodeSchema, params: projectIdParamSchema }), createPeriode);
+router.get('/project/:projectId', validate({ params: projectIdParamSchema }), getPeriodes);
+router.get('/:id', validate({ params: idParamSchema }), getPeriodeById);
+router.put('/:id', validate({ body: createPeriodeSchema.partial(), params: idParamSchema }), updatePeriode);
+router.delete('/:id', validate({ params: idParamSchema }), deletePeriode);
 
 export default router;

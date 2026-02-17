@@ -44,6 +44,14 @@ export const uploadPhoto = async (
 
     const folderPath = project.rows[0].folder_path;
 
+    // PHASE 2: Validate MIME type BEFORE moving file
+    const ALLOWED_PHOTO_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
+    if (!ALLOWED_PHOTO_MIMES.includes(req.file.mimetype)) {
+      // Clean up temp file
+      await fs.unlink(req.file.path).catch(() => {});
+      throw new ApiError(`Invalid file type: ${req.file.mimetype}. Only images are allowed.`, 400);
+    }
+
     // Move file to project folder
     const destPath = path.join(
       process.cwd(),
@@ -56,6 +64,17 @@ export const uploadPhoto = async (
     // Ensure directory exists
     await fs.mkdir(path.dirname(destPath), { recursive: true });
     await fs.rename(req.file.path, destPath);
+
+    // PHASE 2: Safe JSON.parse for tags
+    let parsedTags: any[] = [];
+    if (tags) {
+      try {
+        parsedTags = JSON.parse(tags);
+        if (!Array.isArray(parsedTags)) parsedTags = [];
+      } catch {
+        parsedTags = [];
+      }
+    }
 
     const photoId = uuidv4();
     const filePath = `/uploads/${folderPath}/Photo/${req.file.filename}`;
@@ -74,7 +93,7 @@ export const uploadPhoto = async (
         req.file.size,
         req.file.mimetype,
         description || '',
-        tags ? JSON.parse(tags) : [],
+        parsedTags,
         latitude ? parseFloat(latitude) : null,
         longitude ? parseFloat(longitude) : null
       ]

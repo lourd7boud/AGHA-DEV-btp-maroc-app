@@ -59,9 +59,14 @@ let isListening = false;
 export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
   logger.info('Initializing Socket.IO server...');
 
+  // PHASE 2: Consistent CORS with index.ts — no wildcard fallback
+  const allowedOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+    : ['http://localhost:5173', 'http://localhost:3000'];
+
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: process.env.CORS_ORIGIN || '*',
+      origin: allowedOrigins.includes('*') ? '*' : allowedOrigins,
       methods: ['GET', 'POST'],
       credentials: true,
     },
@@ -91,8 +96,9 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
         return next(new Error('Authentication required'));
       }
 
-      const jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
-      const decoded = jwt.verify(token, jwtSecret) as { id: string };
+      // PHASE 2: Consistent JWT secret with auth middleware — no insecure default
+      const jwtSecret = process.env.JWT_SECRET || 'dev-only-insecure-secret-do-not-use-in-production';
+      const decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS256', 'HS384', 'HS512'] }) as { id: string };
 
       authSocket.userId = decoded.id;
       authSocket.deviceId = authSocket.handshake.auth?.deviceId || 'unknown';

@@ -3,25 +3,15 @@ import { getPool } from '../config/postgres';
 import { ApiError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import logger from '../utils/logger';
+import { keysToCamel } from '../utils/transform';
 
 /**
  * Photo Albums Controller
  * Manages photo albums for project organization
  */
 
-// Convert snake_case to camelCase
-const toCamelCase = (obj: any): any => {
-  if (obj === null || obj === undefined) return obj;
-  if (Array.isArray(obj)) return obj.map(toCamelCase);
-  if (typeof obj !== 'object') return obj;
-  
-  const newObj: any = {};
-  for (const key in obj) {
-    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-    newObj[camelKey] = toCamelCase(obj[key]);
-  }
-  return newObj;
-};
+// Use canonical keysToCamel (was duplicated as toCamelCase)
+const toCamelCase = keysToCamel;
 
 /**
  * Get all albums for a project

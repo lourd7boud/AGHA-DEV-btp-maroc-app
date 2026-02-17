@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
+import { validate } from '../middleware/validate';
+import { createBordereauSchema, updateBordereauSchema, projectIdParamSchema, idParamSchema } from '../middleware/schemas';
 import {
   createBordereau,
   getBordereaux,
@@ -11,10 +13,10 @@ import {
 const router = Router();
 router.use(authenticate);
 
-router.post('/', createBordereau);
-router.get('/project/:projectId', getBordereaux);
-router.get('/:id', getBordereauById);
-router.put('/:id', updateBordereau);
-router.delete('/:id', deleteBordereau);
+router.post('/', validate({ body: createBordereauSchema }), createBordereau);
+router.get('/project/:projectId', validate({ params: projectIdParamSchema }), getBordereaux);
+router.get('/:id', validate({ params: idParamSchema }), getBordereauById);
+router.put('/:id', validate({ params: idParamSchema, body: updateBordereauSchema }), updateBordereau);
+router.delete('/:id', validate({ params: idParamSchema }), deleteBordereau);
 
 export default router;

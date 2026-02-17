@@ -1,6 +1,8 @@
 /**
  * Utility functions to transform database results
  * Converts snake_case to camelCase for frontend compatibility
+ * 
+ * CANONICAL source — all controllers should import from here.
  */
 
 /**
@@ -11,19 +13,34 @@ export function snakeToCamel(str: string): string {
 }
 
 /**
- * Convert an object's keys from snake_case to camelCase
+ * Convert an object's keys from snake_case to camelCase (recursive).
+ * Also normalises Date objects and ISO-8601 strings to ISO format.
  */
-export function keysToCamel<T>(obj: any): T {
-  if (Array.isArray(obj)) {
-    return obj.map(v => keysToCamel<T>(v)) as any;
-  } else if (obj !== null && obj !== undefined && obj.constructor === Object) {
-    return Object.keys(obj).reduce((result, key) => {
-      const camelKey = snakeToCamel(key);
-      result[camelKey] = keysToCamel(obj[key]);
-      return result;
-    }, {} as any);
+export function keysToCamel<T = any>(obj: any): T {
+  if (obj === null || obj === undefined) return obj as any;
+  if (obj instanceof Date) return obj.toISOString() as any;
+  if (Array.isArray(obj)) return obj.map(v => keysToCamel(v)) as any;
+  if (typeof obj !== 'object') return obj;
+
+  const result: any = {};
+  for (const key of Object.keys(obj)) {
+    const camelKey = snakeToCamel(key);
+    let value = obj[key];
+
+    // Normalise dates to ISO strings for JSON transport
+    if (value instanceof Date) {
+      value = value.toISOString();
+    } else if (
+      typeof value === 'string' &&
+      /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(value)
+    ) {
+      const d = new Date(value);
+      if (!isNaN(d.getTime())) value = d.toISOString();
+    }
+
+    result[camelKey] = keysToCamel(value);
   }
-  return obj;
+  return result;
 }
 
 /**
@@ -34,11 +51,11 @@ export function camelToSnake(str: string): string {
 }
 
 /**
- * Convert an object's keys from camelCase to snake_case
+ * Convert an object's keys from camelCase to snake_case (recursive)
  */
-export function keysToSnake<T>(obj: any): T {
+export function keysToSnake<T = any>(obj: any): T {
   if (Array.isArray(obj)) {
-    return obj.map(v => keysToSnake<T>(v)) as any;
+    return obj.map(v => keysToSnake(v)) as any;
   } else if (obj !== null && obj !== undefined && obj.constructor === Object) {
     return Object.keys(obj).reduce((result, key) => {
       const snakeKey = camelToSnake(key);
@@ -47,4 +64,13 @@ export function keysToSnake<T>(obj: any): T {
     }, {} as any);
   }
   return obj;
+}
+
+/**
+ * Strip a colon-separated prefix from an ID string.
+ * e.g. "project:abc-123" → "abc-123", plain "abc-123" → "abc-123"
+ */
+export function cleanPrefixedId(id: string): string {
+  if (!id) return id;
+  return id.includes(':') ? id.split(':').pop()! : id;
 }

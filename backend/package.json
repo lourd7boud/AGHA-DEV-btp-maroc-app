@@ -36,7 +36,7 @@
     "validator": "^13.11.0",
     "winston": "^3.11.0",
     "xlsx": "^0.18.5",
-    "zod": "^3.22.4"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

@@ -165,17 +165,29 @@ export const updateBordereau = async (
     }, 0);
     const calculatedMontantTTC = calculatedMontantHT * 1.2;
 
-    // Update bordereau with lignes and montantTotal
-    const result = await pool.query(
-      `UPDATE bordereaux SET lignes = $1, montant_total = $2, updated_at = NOW() WHERE id = $3 RETURNING *`,
-      [JSON.stringify(lignes || []), montantTotal || calculatedMontantHT, id]
-    );
+    // PHASE 2: Use transaction for atomic bordereau + project update
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
 
-    // Update project's montant with TTC value
-    await pool.query(
-      `UPDATE projects SET montant = $1, updated_at = NOW() WHERE id = $2`,
-      [calculatedMontantTTC, bordereau.project_id]
-    );
+      result = await client.query(
+        `UPDATE bordereaux SET lignes = $1, montant_total = $2, updated_at = NOW() WHERE id = $3 RETURNING *`,
+        [JSON.stringify(lignes || []), montantTotal || calculatedMontantHT, id]
+      );
+
+      await client.query(
+        `UPDATE projects SET montant = $1, updated_at = NOW() WHERE id = $2`,
+        [calculatedMontantTTC, bordereau.project_id]
+      );
+
+      await client.query('COMMIT');
+    } catch (txError) {
+      await client.query('ROLLBACK');
+      throw txError;
+    } finally {
+      client.release();
+    }
 
     logger.info(`Bordereau updated: ${id}, Project montant updated to: ${calculatedMontantTTC}`);
 

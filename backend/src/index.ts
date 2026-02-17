@@ -35,6 +35,7 @@ import healthRoutes from './routes/health.routes';
 import revisionRoutes from './routes/revision.routes';
 import indexManagementRoutes from './routes/indexManagement.routes';
 import albumRoutes from './routes/album.routes';
+import dashboardRoutes from './routes/dashboard.routes';
 
 logger.info('All routes imported successfully');
 
@@ -152,6 +153,7 @@ app.use('/api/assets', assetRoutes);
 app.use('/api/revision', revisionRoutes);
 app.use('/api/index-management', indexManagementRoutes);
 app.use('/api/albums', albumRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // Error handling
 app.use(notFound);

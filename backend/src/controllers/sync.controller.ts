@@ -21,57 +21,20 @@ import logger from '../utils/logger';
 /**
  * Convert snake_case to camelCase and format dates
  */
-const snakeToCamel = (obj: any): any => {
-  if (obj === null || obj === undefined) return obj;
-  if (Array.isArray(obj)) return obj.map(snakeToCamel);
-  
-  if (obj instanceof Date) {
-    return obj.toISOString();
-  }
-  
-  if (typeof obj !== 'object') return obj;
-  
-  const newObj: any = {};
-  for (const key in obj) {
-    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-    let value = obj[key];
-    
-    if (value instanceof Date) {
-      value = value.toISOString();
-    } else if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(value)) {
-      const date = new Date(value);
-      if (!isNaN(date.getTime())) {
-        value = date.toISOString();
-      }
-    }
-    
-    newObj[camelKey] = snakeToCamel(value);
-  }
-  return newObj;
-};
+import { keysToCamel, camelToSnake, cleanPrefixedId } from '../utils/transform';
 
-/**
- * Convert camelCase to snake_case
- */
-const camelToSnake = (str: string): string => {
-  return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
-};
+// Alias for backward compat within this file
+const snakeToCamel = keysToCamel;
 
 /**
  * Clean entity ID (remove prefix like "project:", "bordereau:", etc.)
  */
-const cleanEntityId = (entityId: string): string => {
-  if (!entityId) return entityId;
-  return entityId.includes(':') ? entityId.split(':').pop()! : entityId;
-};
+const cleanEntityId = cleanPrefixedId;
 
 /**
  * Clean operation ID (remove prefix like "sync:", "op:", etc.)
  */
-const cleanOpId = (opId: string): string => {
-  if (!opId) return opId;
-  return opId.includes(':') ? opId.split(':').pop()! : opId;
-};
+const cleanOpId = cleanPrefixedId;
 
 /**
  * Map entity type to table name

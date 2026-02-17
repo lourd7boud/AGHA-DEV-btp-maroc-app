@@ -9,7 +9,9 @@
  */
 
 import { Request, Response } from 'express';
-import pool from '../config/postgres';
+import { getPool } from '../config/postgres';
+import { AuthRequest } from '../middleware/auth';
+import { ApiError } from '../middleware/errorHandler';
 import logger from '../utils/logger';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -22,6 +24,7 @@ import logger from '../utils/logger';
  */
 export async function getFormulas(req: Request, res: Response) {
   try {
+    const pool = getPool();
     const result = await pool.query(`
       SELECT 
         id,
@@ -48,6 +51,7 @@ export async function getFormulas(req: Request, res: Response) {
  */
 export async function getFormula(req: Request, res: Response): Promise<void> {
   try {
+    const pool = getPool();
     const { id } = req.params;
     
     const result = await pool.query(`
@@ -80,6 +84,7 @@ export async function getFormula(req: Request, res: Response): Promise<void> {
  */
 export async function createFormula(req: Request, res: Response): Promise<void> {
   try {
+    const pool = getPool();
     const { name, description, fixedPart, weights, isDefault } = req.body;
     
     // Validate sum = 1
@@ -92,18 +97,29 @@ export async function createFormula(req: Request, res: Response): Promise<void> 
       return;
     }
     
-    // If setting as default, unset other defaults
-    if (isDefault) {
-      await pool.query('UPDATE revision_formulas SET is_default = false');
+    // PHASE 2: Use transaction to atomically unset default + insert
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      if (isDefault) {
+        await client.query('UPDATE revision_formulas SET is_default = false');
+      }
+
+      const result = await client.query(`
+        INSERT INTO revision_formulas (name, description, fixed_part, weights, is_default)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+      `, [name, description, fixedPart, JSON.stringify(weights), isDefault || false]);
+
+      await client.query('COMMIT');
+      res.status(201).json({ id: result.rows[0].id, message: 'Formula created' });
+    } catch (txError) {
+      await client.query('ROLLBACK');
+      throw txError;
+    } finally {
+      client.release();
     }
-    
-    const result = await pool.query(`
-      INSERT INTO revision_formulas (name, description, fixed_part, weights, is_default)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id
-    `, [name, description, fixedPart, JSON.stringify(weights), isDefault || false]);
-    
-    res.status(201).json({ id: result.rows[0].id, message: 'Formula created' });
   } catch (error) {
     logger.error('Error creating formula:', error);
     res.status(500).json({ error: 'Failed to create formula' });
@@ -120,6 +136,7 @@ export async function createFormula(req: Request, res: Response): Promise<void> 
  */
 export async function getIndexes(req: Request, res: Response) {
   try {
+    const pool = getPool();
     const { year, month } = req.query;
     
     let query = `
@@ -165,6 +182,7 @@ export async function getIndexes(req: Request, res: Response) {
  */
 export async function createIndex(req: Request, res: Response) {
   try {
+    const pool = getPool();
     const { monthDate, indexValues, source } = req.body;
     
     const result = await pool.query(`
@@ -190,6 +208,7 @@ export async function createIndex(req: Request, res: Response) {
  */
 export async function updateIndex(req: Request, res: Response) {
   try {
+    const pool = getPool();
     const { id } = req.params;
     const { indexValues, source } = req.body;
     
@@ -212,6 +231,7 @@ export async function updateIndex(req: Request, res: Response) {
  */
 export async function deleteIndex(req: Request, res: Response) {
   try {
+    const pool = getPool();
     const { id } = req.params;
     
     await pool.query('DELETE FROM revision_indexes WHERE id = $1', [id]);
@@ -234,6 +254,7 @@ export async function deleteIndex(req: Request, res: Response) {
  */
 export async function getProjectConfig(req: Request, res: Response): Promise<void> {
   try {
+    const pool = getPool();
     // Support both :projectId and :id params
     const projectId = req.params.projectId || req.params.id;
     
@@ -289,66 +310,80 @@ export async function getProjectConfig(req: Request, res: Response): Promise<voi
  */
 export async function createProjectConfig(req: Request, res: Response) {
   try {
+    const pool = getPool();
     // Support both :projectId and :id params
     const projectId = req.params.projectId || req.params.id;
     const { formula, formulaId, baseIndexes, baseDate, isEnabled, notes } = req.body;
     
-    let finalFormulaId = formulaId;
-    
-    // إذا تم إرسال صيغة مضمّنة، قم بحفظها أولاً
-    if (formula && !formulaId) {
-      const formulaResult = await pool.query(`
-        INSERT INTO revision_formulas (name, description, fixed_part, weights, is_default)
-        VALUES ($1, $2, $3, $4, false)
+    // PHASE 2: Use transaction for atomic formula creation + config save
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      let finalFormulaId = formulaId;
+      
+      // إذا تم إرسال صيغة مضمّنة، قم بحفظها أولاً
+      if (formula && !formulaId) {
+        const formulaResult = await client.query(`
+          INSERT INTO revision_formulas (name, description, fixed_part, weights, is_default)
+          VALUES ($1, $2, $3, $4, false)
+          RETURNING id
+        `, [
+          formula.name || 'Formule personnalisée',
+          formula.description || null,
+          formula.fixedPart || 0.15,
+          JSON.stringify(formula.weights || {})
+        ]);
+        finalFormulaId = formulaResult.rows[0].id;
+      }
+      
+      // جلب مؤشرات الأساس من تاريخ الافتتاح إذا لم تُعطَ
+      let finalBaseIndexes = baseIndexes || {};
+      if (baseDate && Object.keys(finalBaseIndexes).length === 0) {
+        const monthKey = baseDate.substring(0, 7) + '-01'; // YYYY-MM-01
+        const indexResult = await client.query(`
+          SELECT index_values FROM revision_indexes WHERE month_date = $1
+        `, [monthKey]);
+        if (indexResult.rows.length > 0) {
+          finalBaseIndexes = indexResult.rows[0].index_values;
+        }
+      }
+      
+      const result = await client.query(`
+        INSERT INTO project_revision_config 
+          (project_id, formula_id, base_indexes, base_date, is_enabled, notes)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (project_id) DO UPDATE SET
+          formula_id = EXCLUDED.formula_id,
+          base_indexes = EXCLUDED.base_indexes,
+          base_date = EXCLUDED.base_date,
+          is_enabled = EXCLUDED.is_enabled,
+          notes = EXCLUDED.notes,
+          updated_at = CURRENT_TIMESTAMP
         RETURNING id
       `, [
-        formula.name || 'Formule personnalisée',
-        formula.description || null,
-        formula.fixedPart || 0.15,
-        JSON.stringify(formula.weights || {})
+        projectId, 
+        finalFormulaId, 
+        JSON.stringify(finalBaseIndexes), 
+        baseDate || null, 
+        isEnabled ?? true, 
+        notes || null
       ]);
-      finalFormulaId = formulaResult.rows[0].id;
+
+      await client.query('COMMIT');
+
+      res.status(201).json({ 
+        id: result.rows[0].id, 
+        formulaId: finalFormulaId,
+        baseIndexesLoaded: Object.keys(finalBaseIndexes).length,
+        message: 'Config saved' 
+      });
+    } catch (txError) {
+      await client.query('ROLLBACK');
+      throw txError;
+    } finally {
+      client.release();
     }
-    
-    // جلب مؤشرات الأساس من تاريخ الافتتاح إذا لم تُعطَ
-    let finalBaseIndexes = baseIndexes || {};
-    if (baseDate && Object.keys(finalBaseIndexes).length === 0) {
-      const monthKey = baseDate.substring(0, 7) + '-01'; // YYYY-MM-01
-      const indexResult = await pool.query(`
-        SELECT index_values FROM revision_indexes WHERE month_date = $1
-      `, [monthKey]);
-      if (indexResult.rows.length > 0) {
-        finalBaseIndexes = indexResult.rows[0].index_values;
-      }
-    }
-    
-    const result = await pool.query(`
-      INSERT INTO project_revision_config 
-        (project_id, formula_id, base_indexes, base_date, is_enabled, notes)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      ON CONFLICT (project_id) DO UPDATE SET
-        formula_id = EXCLUDED.formula_id,
-        base_indexes = EXCLUDED.base_indexes,
-        base_date = EXCLUDED.base_date,
-        is_enabled = EXCLUDED.is_enabled,
-        notes = EXCLUDED.notes,
-        updated_at = CURRENT_TIMESTAMP
-      RETURNING id
-    `, [
-      projectId, 
-      finalFormulaId, 
-      JSON.stringify(finalBaseIndexes), 
-      baseDate || null, 
-      isEnabled ?? true, 
-      notes || null
-    ]);
-    
-    res.status(201).json({ 
-      id: result.rows[0].id, 
-      formulaId: finalFormulaId,
-      baseIndexesLoaded: Object.keys(finalBaseIndexes).length,
-      message: 'Config saved' 
-    });
   } catch (error) {
     logger.error('Error creating project config:', error);
     res.status(500).json({ error: 'Failed to save config' });
@@ -362,69 +397,78 @@ export async function createProjectConfig(req: Request, res: Response) {
  */
 export async function updateProjectConfig(req: Request, res: Response) {
   try {
+    const pool = getPool();
     // Support both :projectId and :id params
     const projectId = req.params.projectId || req.params.id;
     const { formula, formulaId, baseIndexes, baseDate, isEnabled, notes } = req.body;
     
-    let finalFormulaId = formulaId;
-    
-    // إذا تم إرسال صيغة مضمّنة بدلاً من formulaId
-    if (formula && !formulaId) {
-      // إنشاء أو تحديث الصيغة المرتبطة بالمشروع
-      const existingConfig = await pool.query(
-        'SELECT formula_id FROM project_revision_config WHERE project_id = $1',
-        [projectId]
-      );
+    // PHASE 2: Use transaction for atomic formula update + config update
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      let finalFormulaId = formulaId;
       
-      if (existingConfig.rows.length > 0 && existingConfig.rows[0].formula_id) {
-        // تحديث الصيغة الموجودة
-        await pool.query(`
-          UPDATE revision_formulas
-          SET name = $1, fixed_part = $2, weights = $3, updated_at = CURRENT_TIMESTAMP
-          WHERE id = $4
-        `, [
-          formula.name || `Project ${projectId} Formula`,
-          formula.fixedPart,
-          JSON.stringify(formula.weights),
-          existingConfig.rows[0].formula_id
-        ]);
-        finalFormulaId = existingConfig.rows[0].formula_id;
-      } else {
-        // إنشاء صيغة جديدة
-        const formulaResult = await pool.query(`
-          INSERT INTO revision_formulas (name, fixed_part, weights, is_public)
-          VALUES ($1, $2, $3, false)
-          RETURNING id
-        `, [
-          formula.name || `Project ${projectId} Formula`,
-          formula.fixedPart,
-          JSON.stringify(formula.weights)
-        ]);
-        finalFormulaId = formulaResult.rows[0].id;
+      // إذا تم إرسال صيغة مضمّنة بدلاً من formulaId
+      if (formula && !formulaId) {
+        const existingConfig = await client.query(
+          'SELECT formula_id FROM project_revision_config WHERE project_id = $1',
+          [projectId]
+        );
+        
+        if (existingConfig.rows.length > 0 && existingConfig.rows[0].formula_id) {
+          await client.query(`
+            UPDATE revision_formulas
+            SET name = $1, fixed_part = $2, weights = $3, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $4
+          `, [
+            formula.name || `Project ${projectId} Formula`,
+            formula.fixedPart,
+            JSON.stringify(formula.weights),
+            existingConfig.rows[0].formula_id
+          ]);
+          finalFormulaId = existingConfig.rows[0].formula_id;
+        } else {
+          const formulaResult = await client.query(`
+            INSERT INTO revision_formulas (name, fixed_part, weights, is_public)
+            VALUES ($1, $2, $3, false)
+            RETURNING id
+          `, [
+            formula.name || `Project ${projectId} Formula`,
+            formula.fixedPart,
+            JSON.stringify(formula.weights)
+          ]);
+          finalFormulaId = formulaResult.rows[0].id;
+        }
       }
+      
+      await client.query(`
+        UPDATE project_revision_config
+        SET 
+          formula_id = $1,
+          base_indexes = $2,
+          base_date = $3,
+          is_enabled = $4,
+          notes = $5,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE project_id = $6
+      `, [
+        finalFormulaId,
+        JSON.stringify(baseIndexes),
+        baseDate || null,
+        isEnabled ?? true,
+        notes || null,
+        projectId
+      ]);
+
+      await client.query('COMMIT');
+      res.json({ message: 'Config updated', formulaId: finalFormulaId });
+    } catch (txError) {
+      await client.query('ROLLBACK');
+      throw txError;
+    } finally {
+      client.release();
     }
-    
-    // تحديث إعدادات المشروع
-    await pool.query(`
-      UPDATE project_revision_config
-      SET 
-        formula_id = $1,
-        base_indexes = $2,
-        base_date = $3,
-        is_enabled = $4,
-        notes = $5,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE project_id = $6
-    `, [
-      finalFormulaId,
-      JSON.stringify(baseIndexes),
-      baseDate || null,
-      isEnabled ?? true,
-      notes || null,
-      projectId
-    ]);
-    
-    res.json({ message: 'Config updated', formulaId: finalFormulaId });
   } catch (error) {
     logger.error('Error updating project config:', error);
     res.status(500).json({ error: 'Failed to update config' });

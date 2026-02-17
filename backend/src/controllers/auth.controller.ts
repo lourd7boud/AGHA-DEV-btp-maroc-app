@@ -448,6 +448,13 @@ export const updateUser = async (
       values.push(lastName);
     }
     if (role) {
+      // PHASE 2: Prevent role escalation — only super_admin can set admin/super_admin
+      if ((role === 'admin' || role === 'super_admin') && req.user!.role !== 'super_admin') {
+        throw new ApiError('Only super_admin can assign admin roles', 403);
+      }
+      if (!['user', 'admin', 'super_admin'].includes(role)) {
+        throw new ApiError('Invalid role', 400);
+      }
       updates.push(`role = $${paramIndex++}`);
       values.push(role);
     }

@@ -15,6 +15,13 @@ import {
   updateProjectConfig,
 } from '../controllers/revision.controller';
 import { authenticate } from '../middleware/auth';
+import { validate } from '../middleware/validate';
+import {
+  createProjectSchema,
+  updateProjectSchema,
+  createProjectConfigSchema,
+  idParamSchema,
+} from '../middleware/schemas';
 
 const router = Router();
 
@@ -26,7 +33,7 @@ router.use(authenticate);
  * @desc    Create new project
  * @access  Private
  */
-router.post('/', createProject);
+router.post('/', validate({ body: createProjectSchema }), createProject);
 
 /**
  * @route   GET /api/projects
@@ -47,14 +54,14 @@ router.get('/:id', getProjectById);
  * @desc    Update project
  * @access  Private
  */
-router.put('/:id', updateProject);
+router.put('/:id', validate({ body: updateProjectSchema, params: idParamSchema }), updateProject);
 
 /**
  * @route   DELETE /api/projects/:id
  * @desc    Delete project (soft delete)
  * @access  Private
  */
-router.delete('/:id', deleteProject);
+router.delete('/:id', validate({ params: idParamSchema }), deleteProject);
 
 /**
  * @route   GET /api/projects/deleted/list
@@ -93,14 +100,14 @@ router.get('/:id/revision-config', getProjectConfig);
  * @desc    Create/Update project revision formula configuration
  * @access  Private
  */
-router.post('/:id/revision-config', createProjectConfig);
+router.post('/:id/revision-config', validate({ body: createProjectConfigSchema, params: idParamSchema }), createProjectConfig);
 
 /**
  * @route   PUT /api/projects/:id/revision-config
  * @desc    Update project revision formula configuration
  * @access  Private
  */
-router.put('/:id/revision-config', updateProjectConfig);
+router.put('/:id/revision-config', validate({ body: createProjectConfigSchema.partial(), params: idParamSchema }), updateProjectConfig);
 
 /**
  * @route   DELETE /api/projects/:id/revision-config

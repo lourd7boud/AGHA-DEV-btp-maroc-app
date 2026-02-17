@@ -10,6 +10,8 @@
 
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
+import { validate } from '../middleware/validate';
+import { createFormulaSchema, createIndexSchema, createProjectConfigSchema, idParamSchema, projectIdParamSchema } from '../middleware/schemas';
 import {
   // Formulas
   getFormulas,
@@ -53,7 +55,7 @@ router.get('/formulas/:id', getFormula);
  * POST /api/revision/formulas
  * إنشاء صيغة جديدة
  */
-router.post('/formulas', createFormula);
+router.post('/formulas', validate({ body: createFormulaSchema }), createFormula);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 📊 INDEXES
@@ -70,19 +72,19 @@ router.get('/indexes', getIndexes);
  * POST /api/revision/indexes
  * إضافة مؤشرات شهر جديد
  */
-router.post('/indexes', createIndex);
+router.post('/indexes', validate({ body: createIndexSchema }), createIndex);
 
 /**
  * PUT /api/revision/indexes/:id
  * تحديث مؤشرات شهر
  */
-router.put('/indexes/:id', updateIndex);
+router.put('/indexes/:id', validate({ body: createIndexSchema.partial(), params: idParamSchema }), updateIndex);
 
 /**
  * DELETE /api/revision/indexes/:id
  * حذف مؤشرات شهر
  */
-router.delete('/indexes/:id', deleteIndex);
+router.delete('/indexes/:id', validate({ params: idParamSchema }), deleteIndex);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ⚙️ PROJECT CONFIG
@@ -98,13 +100,13 @@ router.get('/config/:projectId', getProjectConfig);
  * POST /api/revision/config/:projectId
  * إنشاء/تحديث إعدادات المراجعة للمشروع
  */
-router.post('/config/:projectId', createProjectConfig);
+router.post('/config/:projectId', validate({ body: createProjectConfigSchema, params: projectIdParamSchema }), createProjectConfig);
 
 /**
  * PUT /api/revision/config/:projectId
  * تحديث إعدادات المراجعة للمشروع
  */
-router.put('/config/:projectId', updateProjectConfig);
+router.put('/config/:projectId', validate({ body: createProjectConfigSchema.partial(), params: projectIdParamSchema }), updateProjectConfig);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 🧮 CALCULATION (Phase 3)
