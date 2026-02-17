@@ -20,6 +20,19 @@ export const setupRealtimeTriggers = async (): Promise<void> => {
   try {
     logger.info('Setting up PostgreSQL realtime triggers...');
 
+    // Check if ops table exists before creating triggers
+    const tableCheck = await client.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = 'ops'
+      ) AS ops_exists
+    `);
+
+    if (!tableCheck.rows[0]?.ops_exists) {
+      logger.warn('ops table does not exist yet — skipping trigger setup. Run migrations first.');
+      return;
+    }
+
     // Create the NOTIFY function
     await client.query(`
       CREATE OR REPLACE FUNCTION notify_ops_change()
