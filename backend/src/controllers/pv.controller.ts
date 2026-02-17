@@ -14,7 +14,6 @@ export const createPV = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== PV CREATE REQUEST ===');
     logger.info('Creating PV...');
     
     if (!req.user) throw new ApiError('Not authenticated', 401);
@@ -78,7 +77,6 @@ export const getPVs = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== PVS GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;

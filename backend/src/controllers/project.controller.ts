@@ -8,6 +8,13 @@ import fs from 'fs/promises';
 import logger from '../utils/logger';
 
 /**
+ * SECURITY: Sanitize path components to prevent directory traversal
+ */
+const sanitizePath = (input: string): string => {
+  return String(input).replace(/[^a-zA-Z0-9\-_\.]/g, '').substring(0, 50);
+};
+
+/**
  * Créer la structure de dossiers pour un projet
  */
 const createProjectFolders = async (folderPath: string): Promise<void> => {
@@ -77,7 +84,14 @@ export const createProject = async (
 
     const pool = getPool();
     const projectId = uuidv4();
-    const folderPath = `${annee}/${marcheNo}`;
+    
+    // SECURITY: Sanitize path components to prevent directory traversal
+    const safeAnnee = sanitizePath(String(annee));
+    const safeMarcheNo = sanitizePath(String(marcheNo));
+    if (!safeAnnee || !safeMarcheNo) {
+      throw new ApiError('Invalid annee or marcheNo format', 400);
+    }
+    const folderPath = `${safeAnnee}/${safeMarcheNo}`;
 
     // Create project in PostgreSQL with all fields
     const result = await pool.query(

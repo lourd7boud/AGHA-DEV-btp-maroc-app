@@ -19,6 +19,7 @@
 
 import { Request, Response } from 'express';
 import pool from '../config/postgres';
+import logger from '../utils/logger';
 import * as XLSX from 'xlsx';
 
 // ═══════════════════════════════════════════════════════════════════════════════════
@@ -315,7 +316,7 @@ async function logAudit(
       req.headers['user-agent']
     ]);
   } catch (error) {
-    console.error('Error logging audit:', error);
+    logger.error('Error logging audit:', error);
   }
 }
 
@@ -383,7 +384,7 @@ export const getIndexCatalog = async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('Error getting catalog:', error);
+    logger.error('Error getting catalog:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -469,7 +470,7 @@ export const listIndexes = async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('Error listing indexes:', error);
+    logger.error('Error listing indexes:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -533,7 +534,7 @@ export const getMonthIndexes = async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('Error getting month indexes:', error);
+    logger.error('Error getting month indexes:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -603,7 +604,7 @@ export const createMonthIndexes = async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('Error creating month indexes:', error);
+    logger.error('Error creating month indexes:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -705,7 +706,7 @@ export const updateMonthIndexes = async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('Error updating month indexes:', error);
+    logger.error('Error updating month indexes:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -752,7 +753,7 @@ export const deleteMonthIndexes = async (req: Request, res: Response) => {
       message: `Month ${month} deleted successfully`
     });
   } catch (error: any) {
-    console.error('Error deleting month indexes:', error);
+    logger.error('Error deleting month indexes:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -805,7 +806,7 @@ export const downloadTemplate = async (req: Request, res: Response) => {
     res.setHeader('Content-Disposition', 'attachment; filename=index_template.xlsx');
     res.send(buffer);
   } catch (error: any) {
-    console.error('Error generating template:', error);
+    logger.error('Error generating template:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -911,7 +912,7 @@ export const importFromExcel = async (req: Request, res: Response) => {
       data: results
     });
   } catch (error: any) {
-    console.error('Error importing from Excel:', error);
+    logger.error('Error importing from Excel:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -965,7 +966,7 @@ export const getAuditLog = async (req: Request, res: Response) => {
       }))
     });
   } catch (error: any) {
-    console.error('Error getting audit log:', error);
+    logger.error('Error getting audit log:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };

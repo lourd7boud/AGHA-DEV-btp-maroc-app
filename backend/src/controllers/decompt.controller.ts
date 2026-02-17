@@ -15,7 +15,6 @@ export const createDecompt = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== DECOMPT CREATE REQUEST ===');
     logger.info('Creating decompt...');
     
     if (!req.user) throw new ApiError('Not authenticated', 401);
@@ -80,7 +79,7 @@ export const createDecompt = async (
         montantActuel || 0,
         montantTotal || 0,
         totalTTC || 0,
-        totalGeneralTTC || totalTTC || 0,
+        totalGeneralTTC ?? totalTTC ?? 0,
         isDernier || false
       ]
     );
@@ -106,7 +105,6 @@ export const getDecompts = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== DECOMPTS GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;
@@ -181,9 +179,6 @@ export const updateDecompt = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== DECOMPT UPDATE REQUEST ===');
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
-    
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
@@ -240,7 +235,7 @@ export const updateDecompt = async (
         montantActuel, 
         montantTotal,
         totalTTC,
-        totalGeneralTTC || totalTTC,
+        totalGeneralTTC ?? totalTTC,
         lignes ? JSON.stringify(lignes) : null,
         isDernier,
         statut,

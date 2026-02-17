@@ -14,7 +14,6 @@ export const createBordereau = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== BORDEREAU CREATE REQUEST ===');
     logger.info('Creating bordereau...');
     
     if (!req.user) throw new ApiError('Not authenticated', 401);
@@ -66,7 +65,6 @@ export const getBordereaux = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== BORDEREAU GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;

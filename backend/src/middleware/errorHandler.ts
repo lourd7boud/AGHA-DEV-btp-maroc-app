@@ -13,27 +13,31 @@ export const errorHandler = (
   next: NextFunction
 ) => {
   const statusCode = err.statusCode || 500;
-  const message = err.message || 'Internal Server Error';
+  const isProduction = process.env.NODE_ENV === 'production';
 
-  logger.error(`Error: ${message}`, {
+  logger.error(`Error: ${err.message}`, {
     statusCode,
     stack: err.stack,
     path: req.path,
     method: req.method,
   });
 
-  // Force JSON response with correct Content-Type
+  // SECURITY: Don't leak internal error details (DB schema, stack traces) in production
+  const message = (isProduction && statusCode === 500)
+    ? 'Internal Server Error'
+    : (err.message || 'Internal Server Error');
+
   res.setHeader('Content-Type', 'application/json');
-  
-  // Prevent any HTML error pages from nginx/express
   res.status(statusCode).json({
     success: false,
     error: {
       message,
       statusCode,
-      path: req.path,
       timestamp: new Date().toISOString(),
-      ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+      ...(!isProduction && {
+        path: req.path,
+        stack: err.stack,
+      }),
     },
   });
 };

@@ -16,7 +16,6 @@ export const uploadPhoto = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== PHOTO UPLOAD REQUEST ===');
     logger.info('Uploading photo...');
     
     if (!req.user) throw new ApiError('Not authenticated', 401);
@@ -102,7 +101,6 @@ export const getPhotos = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== PHOTOS GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;

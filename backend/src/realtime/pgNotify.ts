@@ -16,7 +16,7 @@ export const setupRealtimeTriggers = async (): Promise<void> => {
   const client = await pool.connect();
 
   try {
-    console.log('🔧 Setting up PostgreSQL realtime triggers...');
+    logger.info('Setting up PostgreSQL realtime triggers...');
 
     // Create ops table if not exists (with all required columns)
     await client.query(`
@@ -44,7 +44,7 @@ export const setupRealtimeTriggers = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_ops_ts ON ops(ts);
       CREATE INDEX IF NOT EXISTS idx_ops_user_seq ON ops(user_id, server_seq);
     `);
-    console.log('✅ ops table ready');
+    logger.info('ops table ready');
 
     // Create sync_clients table for tracking client sync state
     await client.query(`
@@ -61,7 +61,7 @@ export const setupRealtimeTriggers = async (): Promise<void> => {
 
       CREATE INDEX IF NOT EXISTS idx_sync_clients_user_id ON sync_clients(user_id);
     `);
-    console.log('✅ sync_clients table ready');
+    logger.info('sync_clients table ready');
 
     // Add missing columns to existing tables for sync tracking
     await client.query(`
@@ -141,7 +141,7 @@ export const setupRealtimeTriggers = async (): Promise<void> => {
         WHEN others THEN NULL;
       END $$;
     `);
-    console.log('✅ Entity tables updated with sync columns');
+    logger.info('Entity tables updated with sync columns');
 
     // Create the NOTIFY function
     await client.query(`
@@ -170,7 +170,7 @@ export const setupRealtimeTriggers = async (): Promise<void> => {
       END;
       $$ LANGUAGE plpgsql;
     `);
-    console.log('✅ notify_ops_change function created');
+    logger.info('notify_ops_change function created');
 
     // Create the trigger
     await client.query(`
@@ -181,7 +181,7 @@ export const setupRealtimeTriggers = async (): Promise<void> => {
         FOR EACH ROW
         EXECUTE FUNCTION notify_ops_change();
     `);
-    console.log('✅ ops_notify_trigger created');
+    logger.info('ops_notify_trigger created');
 
     // Create a function to get latest server_seq for a user
     await client.query(`
@@ -195,7 +195,7 @@ export const setupRealtimeTriggers = async (): Promise<void> => {
       END;
       $$ LANGUAGE plpgsql;
     `);
-    console.log('✅ get_latest_seq function created');
+    logger.info('get_latest_seq function created');
 
     // Create a function to clean old ops
     await client.query(`
@@ -213,14 +213,12 @@ export const setupRealtimeTriggers = async (): Promise<void> => {
       END;
       $$ LANGUAGE plpgsql;
     `);
-    console.log('✅ clean_old_ops function created');
+    logger.info('clean_old_ops function created');
 
-    logger.info('✅ PostgreSQL realtime triggers setup complete');
-    console.log('✅ PostgreSQL realtime triggers setup complete');
+    logger.info('PostgreSQL realtime triggers setup complete');
 
   } catch (error: any) {
-    console.error('❌ Error setting up realtime triggers:', error.message);
-    logger.error('❌ Error setting up realtime triggers:', error);
+    logger.error('Error setting up realtime triggers:', error);
     throw error;
   } finally {
     client.release();
@@ -249,7 +247,7 @@ export const testNotification = async (): Promise<boolean> => {
       RETURNING server_seq, op_id
     `);
 
-    console.log('✅ Test notification sent:', result.rows[0]);
+    logger.info('Test notification sent:', result.rows[0]);
     
     // Clean up test
     await pool.query(`
@@ -258,7 +256,7 @@ export const testNotification = async (): Promise<boolean> => {
 
     return true;
   } catch (error: any) {
-    console.error('❌ Test notification failed:', error.message);
+    logger.error('Test notification failed:', error.message);
     return false;
   }
 };

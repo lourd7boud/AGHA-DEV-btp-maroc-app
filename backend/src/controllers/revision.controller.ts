@@ -10,6 +10,7 @@
 
 import { Request, Response } from 'express';
 import pool from '../config/postgres';
+import logger from '../utils/logger';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 📋 FORMULAS
@@ -36,7 +37,7 @@ export async function getFormulas(req: Request, res: Response) {
     
     res.json(result.rows);
   } catch (error) {
-    console.error('Error getting formulas:', error);
+    logger.error('Error getting formulas:', error);
     res.status(500).json({ error: 'Failed to get formulas' });
   }
 }
@@ -68,7 +69,7 @@ export async function getFormula(req: Request, res: Response): Promise<void> {
     
     res.json(result.rows[0]);
   } catch (error) {
-    console.error('Error getting formula:', error);
+    logger.error('Error getting formula:', error);
     res.status(500).json({ error: 'Failed to get formula' });
   }
 }
@@ -104,7 +105,7 @@ export async function createFormula(req: Request, res: Response): Promise<void> 
     
     res.status(201).json({ id: result.rows[0].id, message: 'Formula created' });
   } catch (error) {
-    console.error('Error creating formula:', error);
+    logger.error('Error creating formula:', error);
     res.status(500).json({ error: 'Failed to create formula' });
   }
 }
@@ -153,7 +154,7 @@ export async function getIndexes(req: Request, res: Response) {
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (error) {
-    console.error('Error getting indexes:', error);
+    logger.error('Error getting indexes:', error);
     res.status(500).json({ error: 'Failed to get indexes' });
   }
 }
@@ -178,7 +179,7 @@ export async function createIndex(req: Request, res: Response) {
     
     res.status(201).json({ id: result.rows[0].id, message: 'Index saved' });
   } catch (error) {
-    console.error('Error creating index:', error);
+    logger.error('Error creating index:', error);
     res.status(500).json({ error: 'Failed to save index' });
   }
 }
@@ -200,7 +201,7 @@ export async function updateIndex(req: Request, res: Response) {
     
     res.json({ message: 'Index updated' });
   } catch (error) {
-    console.error('Error updating index:', error);
+    logger.error('Error updating index:', error);
     res.status(500).json({ error: 'Failed to update index' });
   }
 }
@@ -217,7 +218,7 @@ export async function deleteIndex(req: Request, res: Response) {
     
     res.json({ message: 'Index deleted' });
   } catch (error) {
-    console.error('Error deleting index:', error);
+    logger.error('Error deleting index:', error);
     res.status(500).json({ error: 'Failed to delete index' });
   }
 }
@@ -275,7 +276,7 @@ export async function getProjectConfig(req: Request, res: Response): Promise<voi
       notes: row.notes
     });
   } catch (error) {
-    console.error('Error getting project config:', error);
+    logger.error('Error getting project config:', error);
     res.status(500).json({ error: 'Failed to get config' });
   }
 }
@@ -291,14 +292,6 @@ export async function createProjectConfig(req: Request, res: Response) {
     // Support both :projectId and :id params
     const projectId = req.params.projectId || req.params.id;
     const { formula, formulaId, baseIndexes, baseDate, isEnabled, notes } = req.body;
-    
-    console.log('📝 [createProjectConfig] Request received:', {
-      projectId,
-      formula: formula ? { name: formula.name, fixedPart: formula.fixedPart, weightsCount: Object.keys(formula.weights || {}).length } : null,
-      formulaId,
-      baseDate,
-      isEnabled
-    });
     
     let finalFormulaId = formulaId;
     
@@ -356,9 +349,8 @@ export async function createProjectConfig(req: Request, res: Response) {
       baseIndexesLoaded: Object.keys(finalBaseIndexes).length,
       message: 'Config saved' 
     });
-    console.log('✅ [createProjectConfig] Saved successfully:', { id: result.rows[0].id, formulaId: finalFormulaId });
   } catch (error) {
-    console.error('❌ [createProjectConfig] Error:', error);
+    logger.error('Error creating project config:', error);
     res.status(500).json({ error: 'Failed to save config' });
   }
 }
@@ -434,7 +426,7 @@ export async function updateProjectConfig(req: Request, res: Response) {
     
     res.json({ message: 'Config updated', formulaId: finalFormulaId });
   } catch (error) {
-    console.error('Error updating project config:', error);
+    logger.error('Error updating project config:', error);
     res.status(500).json({ error: 'Failed to update config' });
   }
 }

@@ -16,7 +16,6 @@ export const uploadAttachment = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== ATTACHMENT UPLOAD REQUEST ===');
     logger.info('Uploading attachment...');
     
     if (!req.user) throw new ApiError('Not authenticated', 401);
@@ -108,7 +107,6 @@ export const getAttachments = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== ATTACHMENTS GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;

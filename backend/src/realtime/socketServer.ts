@@ -57,7 +57,7 @@ let isListening = false;
  * Initialize Socket.IO server
  */
 export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
-  console.log('🔌 Initializing Socket.IO server...');
+  logger.info('Initializing Socket.IO server...');
 
   io = new SocketIOServer(httpServer, {
     cors: {
@@ -87,7 +87,7 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
         authSocket.handshake.headers?.authorization?.replace('Bearer ', '');
 
       if (!token) {
-        console.log('❌ Socket connection rejected: No token');
+        logger.warn('Socket connection rejected: No token');
         return next(new Error('Authentication required'));
       }
 
@@ -98,33 +98,33 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
       authSocket.deviceId = authSocket.handshake.auth?.deviceId || 'unknown';
       authSocket.clientSessionId = authSocket.handshake.auth?.clientSessionId || `session-${Date.now()}`;
 
-      console.log(`✅ Socket authenticated: user=${authSocket.userId}, device=${authSocket.deviceId}, session=${authSocket.clientSessionId}`);
+      logger.info(`Socket authenticated: user=${authSocket.userId}, device=${authSocket.deviceId}, session=${authSocket.clientSessionId}`);
       next();
     } catch (error: any) {
-      console.log('❌ Socket auth error:', error.message);
+      logger.warn('Socket auth error:', error.message);
       next(new Error('Authentication failed'));
     }
   });
 
   // Connection handler
   io.on('connection', (socket: AuthenticatedSocket) => {
-    console.log(`🔌 Socket connected: ${socket.id} (user: ${socket.userId})`);
+    logger.info(`Socket connected: ${socket.id} (user: ${socket.userId})`);
 
     // Join user's personal room
     if (socket.userId) {
       socket.join(`user:${socket.userId}`);
-      console.log(`📢 Socket ${socket.id} joined room: user:${socket.userId}`);
+      logger.debug(`Socket ${socket.id} joined room: user:${socket.userId}`);
     }
 
     // Join project rooms
     socket.on('join:project', (projectId: string) => {
       socket.join(`project:${projectId}`);
-      console.log(`📢 Socket ${socket.id} joined room: project:${projectId}`);
+      logger.debug(`Socket ${socket.id} joined room: project:${projectId}`);
     });
 
     socket.on('leave:project', (projectId: string) => {
       socket.leave(`project:${projectId}`);
-      console.log(`📢 Socket ${socket.id} left room: project:${projectId}`);
+      logger.debug(`Socket ${socket.id} left room: project:${projectId}`);
     });
 
     // Subscribe to entity changes
@@ -132,7 +132,7 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
       for (const entity of entities) {
         socket.join(`entity:${entity}`);
       }
-      console.log(`📢 Socket ${socket.id} subscribed to entities:`, entities);
+      logger.debug(`Socket ${socket.id} subscribed to entities:`, entities);
     });
 
     // Request sync state
@@ -166,29 +166,28 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
           serverTime: Date.now(),
         });
 
-        console.log(`📤 Sent ${operations.length} ops to socket ${socket.id}`);
+        logger.debug(`Sent ${operations.length} ops to socket ${socket.id}`);
       } catch (error: any) {
-        console.error('Sync request error:', error.message);
+        logger.error('Sync request error:', error.message);
         socket.emit('sync:error', { message: error.message });
       }
     });
 
     // Handle disconnection
     socket.on('disconnect', (reason) => {
-      console.log(`🔌 Socket disconnected: ${socket.id} (reason: ${reason})`);
+      logger.info(`Socket disconnected: ${socket.id} (reason: ${reason})`);
     });
 
     // Handle errors
     socket.on('error', (error) => {
-      console.error(`Socket error (${socket.id}):`, error);
+      logger.error(`Socket error (${socket.id}):`, error);
     });
   });
 
   // Start PostgreSQL listener
   startPgListener();
 
-  logger.info('✅ Socket.IO server initialized');
-  console.log('✅ Socket.IO server ready');
+  logger.info('Socket.IO server ready');
 
   return io;
 };
@@ -198,7 +197,7 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
  */
 const startPgListener = async (): Promise<void> => {
   if (isListening) {
-    console.log('📡 PG listener already running');
+    logger.info('PG listener already running');
     return;
   }
 
@@ -213,7 +212,7 @@ const startPgListener = async (): Promise<void> => {
           const payload: NotifyPayload = JSON.parse(msg.payload);
           handleOpsNotification(payload);
         } catch (parseError) {
-          console.error('Error parsing notification payload:', parseError);
+          logger.error('Error parsing notification payload:', parseError);
         }
       }
     });
@@ -222,19 +221,18 @@ const startPgListener = async (): Promise<void> => {
     await pgListenerClient.query('LISTEN ops_channel');
     isListening = true;
 
-    console.log('📡 PostgreSQL LISTEN started on ops_channel');
-    logger.info('📡 PostgreSQL LISTEN started');
+    logger.info('PostgreSQL LISTEN started on ops_channel');
 
     // Handle connection errors
     pgListenerClient.on('error', async (err) => {
-      console.error('PG listener error:', err);
+      logger.error('PG listener error:', err);
       isListening = false;
       // Reconnect after delay
       setTimeout(startPgListener, 5000);
     });
 
   } catch (error: any) {
-    console.error('Failed to start PG listener:', error.message);
+    logger.error('Failed to start PG listener:', error.message);
     // Retry after delay
     setTimeout(startPgListener, 5000);
   }
@@ -273,11 +271,11 @@ const handleOpsNotification = (payload: NotifyPayload): void => {
   
   // CRITICAL: If no sender found, this might be a server-initiated DELETE - DO NOT BROADCAST
   if (senderSockets.length === 0 && payload.op_type === 'DELETE') {
-    console.log(`⚠️ DELETE operation without sender - BLOCKED: ${operation.opId}`);
+    logger.warn(`DELETE operation without sender - BLOCKED: ${operation.opId}`);
     return;
   }
 
-  console.log(`📤 Broadcasting op: ${operation.opId} (${operation.type} ${operation.entity}) - Excluded sockets: ${senderSockets.length}`);
+  logger.debug(`Broadcasting op: ${operation.opId} (${operation.type} ${operation.entity}) - Excluded sockets: ${senderSockets.length}`);
 
   // Broadcast to user's room (excluding the sender's device)
   if (senderSockets.length > 0) {
@@ -309,13 +307,13 @@ export const broadcastOperation = (
   operation: Omit<SyncOperation, 'userId'>
 ): void => {
   if (!io) {
-    console.warn('Socket.IO not initialized, cannot broadcast');
+    logger.warn('Socket.IO not initialized, cannot broadcast');
     return;
   }
 
   const fullOp: SyncOperation = { ...operation, userId };
 
-  console.log(`📤 Direct broadcast: ${operation.opId} to user:${userId}`);
+  logger.debug(`Direct broadcast: ${operation.opId} to user:${userId}`);
 
   // Broadcast to user's room
   io.to(`user:${userId}`).emit('sync:op', fullOp);
@@ -357,7 +355,7 @@ export const shutdownSocketServer = async (): Promise<void> => {
     io = null;
   }
 
-  console.log('🔌 Socket server shut down');
+  logger.info('Socket server shut down');
 };
 
 export const getIO = (): SocketIOServer | null => io;

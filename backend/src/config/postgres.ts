@@ -1,14 +1,24 @@
 import { Pool, PoolClient } from 'pg';
 import logger from '../utils/logger';
 
-// v3 - Enhanced PostgreSQL configuration with verbose logging
-console.log('=== POSTGRES.TS v3 LOADING ===');
-console.log('Environment variables:');
-console.log('  POSTGRES_HOST:', process.env.POSTGRES_HOST || 'localhost (default)');
-console.log('  POSTGRES_PORT:', process.env.POSTGRES_PORT || '5432 (default)');
-console.log('  POSTGRES_DB:', process.env.POSTGRES_DB || 'btpdb (default)');
-console.log('  POSTGRES_USER:', process.env.POSTGRES_USER || 'btpuser (default)');
-console.log('  POSTGRES_PASSWORD:', process.env.POSTGRES_PASSWORD ? '***SET***' : 'BtpSecure2025! (default)');
+// SECURITY: Validate required database credentials in production
+if (!process.env.POSTGRES_PASSWORD) {
+  if (process.env.NODE_ENV === 'production') {
+    logger.error('FATAL: POSTGRES_PASSWORD environment variable is required in production.');
+    process.exit(1);
+  } else {
+    logger.warn('POSTGRES_PASSWORD not set. Using insecure default for development ONLY.');
+  }
+}
+
+// Log config without exposing credentials
+logger.info('PostgreSQL config', {
+  host: process.env.POSTGRES_HOST || 'localhost',
+  port: process.env.POSTGRES_PORT || '5432',
+  database: process.env.POSTGRES_DB || 'btpdb',
+  user: process.env.POSTGRES_USER || 'btpuser',
+  passwordSet: !!process.env.POSTGRES_PASSWORD,
+});
 
 // PostgreSQL connection configuration
 const pool = new Pool({
@@ -16,38 +26,29 @@ const pool = new Pool({
   port: parseInt(process.env.POSTGRES_PORT || '5432'),
   database: process.env.POSTGRES_DB || 'btpdb',
   user: process.env.POSTGRES_USER || 'btpuser',
-  password: process.env.POSTGRES_PASSWORD || 'BtpSecure2025!',
-  max: 20, // Maximum number of clients in the pool
+  password: process.env.POSTGRES_PASSWORD || 'dev-only-password',
+  max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000, // Increased timeout for server
+  connectionTimeoutMillis: 10000,
+  // SECURITY: Enable SSL in production
+  ...(process.env.NODE_ENV === 'production' && process.env.POSTGRES_SSL !== 'false' ? {
+    ssl: { rejectUnauthorized: process.env.POSTGRES_SSL_REJECT_UNAUTHORIZED !== 'false' },
+  } : {}),
 });
 
-console.log('PostgreSQL Pool created with config:', {
-  host: process.env.POSTGRES_HOST || 'localhost',
-  port: parseInt(process.env.POSTGRES_PORT || '5432'),
-  database: process.env.POSTGRES_DB || 'btpdb',
-  user: process.env.POSTGRES_USER || 'btpuser',
-});
-
-// Test connection
 pool.on('connect', () => {
-  console.log('=== POOL EVENT: connect ===');
-  logger.info('✅ Connected to PostgreSQL');
+  logger.info('Connected to PostgreSQL');
 });
 
 pool.on('error', (err: Error) => {
-  console.error('=== POOL EVENT: error ===', err.message);
-  logger.error('❌ PostgreSQL pool error:', err);
+  logger.error('PostgreSQL pool error:', err);
 });
 
 export const initPostgres = async (): Promise<void> => {
-  console.log('=== initPostgres() CALLED ===');
   try {
-    console.log('Attempting to connect to PostgreSQL...');
     const client = await pool.connect();
-    console.log('✅ Successfully connected to PostgreSQL!');
+    logger.info('Successfully connected to PostgreSQL');
     
-    console.log('Creating tables...');
     // Create tables if not exists
     await client.query(`
       -- Users table
@@ -255,12 +256,9 @@ export const initPostgres = async (): Promise<void> => {
     `);
 
     client.release();
-    console.log('✅ All PostgreSQL tables created/verified successfully');
-    logger.info('✅ PostgreSQL tables initialized');
+    logger.info('PostgreSQL tables initialized');
   } catch (error: any) {
-    console.error('❌ PostgreSQL initialization error:', error.message);
-    console.error('Error details:', error);
-    logger.error('❌ PostgreSQL initialization error:', error);
+    logger.error('PostgreSQL initialization error:', error);
     throw error;
   }
 };

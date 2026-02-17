@@ -3,23 +3,16 @@ import ReactDOM from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
+import ErrorBoundary from './components/ErrorBoundary';
 import './i18n';
 import './index.css';
-import { db, forceFullSync, purgeSoftDeleted, getSyncStats } from './db/database';
 
-// 🔴 PROFESSIONAL SYNC: Expose utilities for debugging and troubleshooting
-// Access via browser DevTools console:
-//   window.dbUtils.getSyncStats()
-//   window.dbUtils.forceFullSync()
-//   window.dbUtils.purgeSoftDeleted(30)
-if (typeof window !== 'undefined') {
-  (window as any).dbUtils = {
-    db,
-    forceFullSync,
-    purgeSoftDeleted,
-    getSyncStats,
-  };
-  console.log('🔧 dbUtils exposed on window. Use window.dbUtils.getSyncStats() to check sync status.');
+// SECURITY: Only expose debug utilities in development mode
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  import('./db/database').then(({ db, forceFullSync, purgeSoftDeleted, getSyncStats }) => {
+    (window as any).dbUtils = { db, forceFullSync, purgeSoftDeleted, getSyncStats };
+    console.log('🔧 [DEV] dbUtils exposed on window.');
+  });
 }
 
 const queryClient = new QueryClient({
@@ -34,10 +27,12 @@ const queryClient = new QueryClient({
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <HashRouter>
-        <App />
-      </HashRouter>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <HashRouter>
+          <App />
+        </HashRouter>
+      </QueryClientProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 );

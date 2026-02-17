@@ -15,8 +15,6 @@ export const createMetre = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== METRE CREATE REQUEST ===');
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
     logger.info('Creating metre...');
     
     if (!req.user) throw new ApiError('Not authenticated', 401);
@@ -59,16 +57,7 @@ export const createMetre = async (
     const calculatedTotal = lignes?.reduce((sum: number, l: any) => sum + (Number(l.partiel) || 0), 0) || 0;
     const finalTotalPartiel = totalPartiel ?? calculatedTotal;
 
-    console.log('Saving metre with:', {
-      metreId,
-      projectId,
-      periodeId,
-      bordereauLigneId,
-      sectionsCount: sections?.length || 0,
-      subSectionsCount: subSections?.length || 0,
-      lignesCount: lignes?.length || 0,
-      totalPartiel: finalTotalPartiel
-    });
+    logger.debug('Saving metre', { metreId, projectId, periodeId, lignesCount: lignes?.length || 0 });
 
     const result = await pool.query(
       `INSERT INTO metres (
@@ -121,7 +110,6 @@ export const getMetres = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== METRES GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;
@@ -196,9 +184,6 @@ export const updateMetre = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== METRE UPDATE REQUEST ===');
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
-    
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
@@ -235,13 +220,7 @@ export const updateMetre = async (
     const calculatedTotal = lignes?.reduce((sum: number, l: any) => sum + (Number(l.partiel) || 0), 0) || 0;
     const finalTotalPartiel = totalPartiel ?? calculatedTotal;
 
-    console.log('Updating metre with:', {
-      id,
-      sectionsCount: sections?.length || 0,
-      subSectionsCount: subSections?.length || 0,
-      lignesCount: lignes?.length || 0,
-      totalPartiel: finalTotalPartiel
-    });
+    logger.debug('Updating metre', { id, lignesCount: lignes?.length || 0 });
 
     const result = await pool.query(
       `UPDATE metres SET 

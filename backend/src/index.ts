@@ -3,23 +3,21 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
+import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { ensureJsonResponse } from './middleware/jsonOnly';
+import { authenticate, AuthRequest } from './middleware/auth';
 import logger from './utils/logger';
 import { initPostgres } from './config/postgres';
 import { initSocketServer, setupRealtimeTriggers } from './realtime';
 
-// v3 - Enhanced startup logging
-console.log('');
-console.log('========================================');
-console.log('=== BTP BACKEND SERVER v4 REALTIME ===');
-console.log('========================================');
-console.log('Timestamp:', new Date().toISOString());
-console.log('Node version:', process.version);
-console.log('Environment:', process.env.NODE_ENV || 'development');
-console.log('');
+logger.info('BTP Backend Server v4 starting', {
+  nodeVersion: process.version,
+  environment: process.env.NODE_ENV || 'development',
+  timestamp: new Date().toISOString(),
+});
 
 // Routes
 import authRoutes from './routes/auth.routes';
@@ -38,7 +36,7 @@ import revisionRoutes from './routes/revision.routes';
 import indexManagementRoutes from './routes/indexManagement.routes';
 import albumRoutes from './routes/album.routes';
 
-console.log('✅ All routes imported successfully');
+logger.info('All routes imported successfully');
 
 // dotenv is preloaded via -r dotenv/config in package.json
 
@@ -46,7 +44,7 @@ const app: Express = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-// Configure helmet with relaxed settings for cross-origin resource access and PDF embedding
+// Configure helmet with security-hardened settings
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allow cross-origin access to resources
   crossOriginEmbedderPolicy: false, // Disable COEP for PDF embedding
@@ -55,56 +53,91 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],  // SECURITY: Removed 'unsafe-inline' to prevent XSS
       styleSrc: ["'self'", "'unsafe-inline'", "https:"],
       imgSrc: ["'self'", "data:", "blob:", "https:"],
       fontSrc: ["'self'", "https:", "data:"],
       connectSrc: ["'self'", "https:", "wss:"],
       frameSrc: ["'self'", "blob:", "https:"],
-      objectSrc: ["'self'", "blob:"],
+      objectSrc: ["'none'"],  // SECURITY: Block object embeds
       mediaSrc: ["'self'", "blob:"],
-      frameAncestors: ["'self'", "file:", "https:", "*"], // Allow embedding in Electron (file://)
+      frameAncestors: ["'self'", "file:"],  // SECURITY: Removed wildcard *, keep Electron file:// support
     },
   },
 }));
+
+// SECURITY: Explicit CORS origins instead of wildcard with credentials
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+  : ['http://localhost:5173', 'http://localhost:3000'];  // Dev defaults only
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow requests with no origin (mobile apps, Electron, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    logger.warn('CORS blocked', { origin });
+    callback(new Error(`CORS: Origin ${origin} not allowed`));
+  },
   credentials: true,
 }));
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (message) => logger.info(message.trim()) } }));
-// 🔴 Large limits for bulk photo uploads (500MB)
-app.use(express.json({ limit: '500mb' }));
-app.use(express.urlencoded({ extended: true, limit: '500mb' }));
+
+// SECURITY: Reasonable body limits — was 500MB (DoS risk), now 50MB for photo uploads
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Ensure JSON responses for all API routes
 app.use(ensureJsonResponse);
 
-// Static files (uploads) - with permissive headers for Electron app
-app.use('/uploads', (req, res, next) => {
-  // Allow cross-origin access for Electron app
-  res.setHeader('Access-Control-Allow-Origin', '*');
+// ── Rate Limiting ───────────────────────────────────────────────────────
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000,                // 1000 requests per 15 min per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: { message: 'Too many requests, please try again later' } },
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,                  // 20 login/register attempts per 15 min
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: { message: 'Too many authentication attempts, please try again later' } },
+});
+
+const syncLimiter = rateLimit({
+  windowMs: 60 * 1000,     // 1 minute
+  max: 30,                  // 30 sync operations per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: { message: 'Sync rate limited, please try again shortly' } },
+});
+
+app.use('/api/', globalLimiter);
+
+// SECURITY: Static files behind authentication — was publicly accessible
+app.use('/uploads', authenticate, (req: Request, res, next) => {
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  
-  // Remove restrictive headers for PDF/file embedding in Electron
-  res.removeHeader('Content-Security-Policy');
-  res.setHeader('X-Frame-Options', 'ALLOWALL');
-  res.setHeader('Content-Security-Policy', 'frame-ancestors *');
-  
   next();
 }, express.static('uploads'));
 
-// Health check
+// Health check (minimal info — no uptime leak)
 app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
   });
 });
 
 // API Routes
 app.use('/api/health', healthRoutes);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/bordereau', bordereauRoutes);
@@ -114,7 +147,7 @@ app.use('/api/photos', photoRoutes);
 app.use('/api/pv', pvRoutes);
 app.use('/api/attachments', attachmentRoutes);
 app.use('/api/periodes', periodeRoutes);
-app.use('/api/sync', syncRoutes);
+app.use('/api/sync', syncLimiter, syncRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/revision', revisionRoutes);
 app.use('/api/index-management', indexManagementRoutes);
@@ -129,47 +162,24 @@ const server = createServer(app);
 
 // Initialize Database and Start server
 const startServer = async () => {
-  console.log('');
-  console.log('=== startServer() CALLED ===');
   try {
-    // Initialize PostgreSQL
-    console.log('Initializing PostgreSQL connection...');
     await initPostgres();
-    console.log('✅ PostgreSQL initialized successfully');
+    logger.info('PostgreSQL initialized');
     
-    // Setup realtime triggers (LISTEN/NOTIFY)
-    console.log('Setting up realtime triggers...');
     await setupRealtimeTriggers();
-    console.log('✅ Realtime triggers ready');
+    logger.info('Realtime triggers ready');
     
-    // Initialize Socket.IO
-    console.log('Initializing Socket.IO server...');
     initSocketServer(server);
-    console.log('✅ Socket.IO server ready');
+    logger.info('Socket.IO server ready');
     
-    // Start server
     server.listen(PORT, () => {
-      console.log('');
-      console.log('========================================');
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🔗 API URL: http://localhost:${PORT}`);
-      console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
-      console.log(`📅 Started at: ${new Date().toISOString()}`);
-      console.log('========================================');
-      console.log('');
-      logger.info(`🚀 Server running on port ${PORT}`);
-      logger.info(`📝 Environment: ${process.env.NODE_ENV}`);
-      logger.info(`🔗 API URL: http://localhost:${PORT}`);
+      logger.info(`Server running on port ${PORT}`, {
+        environment: process.env.NODE_ENV || 'development',
+        port: PORT,
+      });
     });
   } catch (error: any) {
-    console.error('');
-    console.error('========================================');
-    console.error('❌ Failed to start server:', error.message);
-    console.error('Error stack:', error.stack);
-    console.error('========================================');
-    console.error('');
-    logger.error('❌ Failed to start server:', error);
+    logger.error('Failed to start server:', error);
     process.exit(1);
   }
 };

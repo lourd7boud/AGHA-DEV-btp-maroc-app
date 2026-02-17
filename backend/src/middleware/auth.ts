@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { ApiError } from './errorHandler';
+import logger from '../utils/logger';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -12,13 +13,24 @@ export interface AuthRequest extends Request {
   };
 }
 
-// Get JWT_SECRET with proper fallback
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+// SECURITY: Fail loud if JWT_SECRET is not configured in production
+const JWT_SECRET = process.env.JWT_SECRET;
 
-// Warn if using default secret
-if (!process.env.JWT_SECRET || JWT_SECRET === 'your-secret-key') {
-  console.warn('⚠️  WARNING: Using default JWT_SECRET in auth middleware. Please set JWT_SECRET in .env file!');
+if (!JWT_SECRET || JWT_SECRET === 'your-secret-key') {
+  if (process.env.NODE_ENV === 'production') {
+    logger.error('FATAL: JWT_SECRET environment variable is not set or uses default value.');
+    process.exit(1);
+  } else {
+    logger.warn('WARNING: JWT_SECRET not set. Using insecure default for development ONLY.');
+  }
 }
+
+const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev-only-insecure-secret-do-not-use-in-production';
+
+// SECURITY: Restrict JWT algorithms to prevent "alg: none" attacks
+const JWT_VERIFY_OPTIONS: jwt.VerifyOptions = {
+  algorithms: ['HS256', 'HS384', 'HS512'],
+};
 
 export const authenticate = async (
   req: AuthRequest,
@@ -26,18 +38,39 @@ export const authenticate = async (
   next: NextFunction
 ) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.toLowerCase().startsWith('bearer ')) {
+      throw new ApiError('No valid authorization header provided', 401);
+    }
 
+    const token = authHeader.slice(7).trim(); // Remove "Bearer " prefix
     if (!token) {
       throw new ApiError('No token provided', 401);
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
-    req.user = decoded;
+    // SECURITY: Enforce algorithm to prevent alg:none attacks
+    const decoded = jwt.verify(token, EFFECTIVE_JWT_SECRET, JWT_VERIFY_OPTIONS) as jwt.JwtPayload;
+
+    // Validate required claims exist in token
+    if (!decoded.id || !decoded.email || !decoded.role) {
+      throw new ApiError('Invalid token payload', 401);
+    }
+
+    // Only assign validated, typed properties to req.user
+    req.user = {
+      id: decoded.id,
+      email: decoded.email,
+      role: decoded.role,
+      firstName: decoded.firstName,
+      lastName: decoded.lastName,
+    };
+
     next();
   } catch (error: any) {
-    // Log the error for debugging
-    console.error('🔒 Token verification failed:', error.message);
+    if (error instanceof ApiError) {
+      return next(error);
+    }
+    logger.warn('Token verification failed', { message: error.message, ip: req.ip, path: req.path });
     next(new ApiError('Invalid or expired token', 401));
   }
 };
@@ -49,6 +82,7 @@ export const authorize = (...roles: string[]) => {
     }
 
     if (!roles.includes(req.user.role)) {
+      logger.warn('Authorization denied', { userId: req.user.id, role: req.user.role, path: req.path });
       return next(new ApiError('Insufficient permissions', 403));
     }
 

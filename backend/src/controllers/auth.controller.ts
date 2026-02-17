@@ -5,15 +5,23 @@ import { v4 as uuidv4 } from 'uuid';
 import { getPool } from '../config/postgres';
 import { ApiError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
+import logger from '../utils/logger';
 
-const JWT_SECRET: Secret = process.env.JWT_SECRET || 'your-secret-key';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
-const JWT_REFRESH_SECRET: Secret = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
-const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
+// SECURITY: No hardcoded secrets — use env vars with dev-only fallback
+const JWT_SECRET: Secret = process.env.JWT_SECRET || 'dev-only-insecure-secret-do-not-use-in-production';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h'; // Reduced from 7d for security
+const JWT_REFRESH_SECRET: Secret = process.env.JWT_REFRESH_SECRET || 'dev-only-refresh-secret-do-not-use';
+const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d'; // Reduced from 30d
 
-if (!JWT_SECRET || JWT_SECRET === 'your-secret-key') {
-  console.warn('⚠️  WARNING: Using default JWT_SECRET. Please set a secure JWT_SECRET in .env file!');
-}
+// SECURITY: Bcrypt cost factor — 12 is the minimum recommended (was 10)
+const BCRYPT_ROUNDS = 12;
+
+// SECURITY: Valid roles whitelist
+const VALID_USER_ROLES = ['user', 'admin'] as const;
+
+// Email format validation
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LENGTH = 8;
 
 const generateToken = (payload: { id: string; email: string; role: string }): string => {
   const options: SignOptions = { expiresIn: JWT_EXPIRES_IN as any };
@@ -52,8 +60,8 @@ export const register = async (
       throw new ApiError('Email already registered', 400);
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Hash password with secure cost factor
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     // Create user
     const userId = uuidv4();
@@ -61,7 +69,7 @@ export const register = async (
       `INSERT INTO users (id, email, password, first_name, last_name, role, is_active, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
        RETURNING id, email, first_name, last_name, role, is_active, created_at`,
-      [userId, email, hashedPassword, firstName, lastName, 'user', true]
+      [userId, email.toLowerCase().trim(), hashedPassword, firstName.trim(), lastName.trim(), 'user', true]
     );
 
     const user = result.rows[0];
@@ -240,12 +248,25 @@ export const refreshToken = async (
       throw new ApiError('Token is required', 400);
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    // SECURITY: Verify with JWT_REFRESH_SECRET (was incorrectly using JWT_SECRET)
+    const decoded = jwt.verify(token, JWT_REFRESH_SECRET, { algorithms: ['HS256'] }) as any;
 
+    // Validate user still exists and is active
+    const pool = getPool();
+    const userCheck = await pool.query(
+      'SELECT id, email, role, is_active FROM users WHERE id = $1',
+      [decoded.id]
+    );
+
+    if (userCheck.rows.length === 0 || !userCheck.rows[0].is_active) {
+      throw new ApiError('User no longer active', 401);
+    }
+
+    const user = userCheck.rows[0];
     const newToken = generateToken({
-      id: decoded.id,
-      email: decoded.email,
-      role: decoded.role
+      id: user.id,
+      email: user.email,
+      role: user.role
     });
 
     res.json({
@@ -326,20 +347,41 @@ export const createUser = async (
       throw new ApiError('All fields are required', 400);
     }
 
+    // SECURITY: Validate email format
+    if (!EMAIL_REGEX.test(email)) {
+      throw new ApiError('Invalid email format', 400);
+    }
+
+    // SECURITY: Enforce password strength
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      throw new ApiError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`, 400);
+    }
+
+    // SECURITY: Validate role against whitelist
+    const userRole = role || 'user';
+    if (!VALID_USER_ROLES.includes(userRole as any) && userRole !== 'super_admin') {
+      throw new ApiError('Invalid role. Allowed: user, admin', 400);
+    }
+
+    // SECURITY: Only super_admin can create admin/super_admin accounts
+    if ((userRole === 'admin' || userRole === 'super_admin') && req.user.role !== 'super_admin') {
+      throw new ApiError('Only super_admin can create admin accounts', 403);
+    }
+
     const pool = getPool();
 
     // Check if user exists
     const existingUser = await pool.query(
       'SELECT id FROM users WHERE email = $1',
-      [email]
+      [email.toLowerCase().trim()]
     );
 
     if (existingUser.rows.length > 0) {
       throw new ApiError('Email already registered', 400);
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Hash password with secure cost factor
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     // Create user
     const userId = uuidv4();
@@ -347,7 +389,7 @@ export const createUser = async (
       `INSERT INTO users (id, email, password, first_name, last_name, role, is_active, trial_end_date, created_by, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, NOW(), NOW())
        RETURNING id, email, first_name, last_name, role, is_active, trial_end_date, created_at`,
-      [userId, email, hashedPassword, firstName, lastName, role || 'user', trialEndDate || null, req.user.id]
+      [userId, email.toLowerCase().trim(), hashedPassword, firstName.trim(), lastName.trim(), userRole, trialEndDate || null, req.user.id]
     );
 
     const user = result.rows[0];
@@ -418,7 +460,11 @@ export const updateUser = async (
       values.push(trialEndDate);
     }
     if (password) {
-      const hashedPassword = await bcrypt.hash(password, 10);
+      // SECURITY: Enforce password strength for updates too
+      if (password.length < MIN_PASSWORD_LENGTH) {
+        throw new ApiError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`, 400);
+      }
+      const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
       updates.push(`password = $${paramIndex++}`);
       values.push(hashedPassword);
     }

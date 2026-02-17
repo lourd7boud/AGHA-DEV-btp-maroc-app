@@ -376,12 +376,6 @@ export const syncPushV2 = async (
       throw new ApiError('Invalid operations data', 400);
     }
 
-    // Direct console log for debugging
-    console.log(`📥 [PUSH] Received ${operations.length} ops from ${clientId}`);
-    operations.forEach((op: any, i: number) => {
-      console.log(`  📥 Op[${i}]: ${op.type} ${op.entity}/${op.entityId?.slice(-8) || 'N/A'}`);
-    });
-
     logger.info(`[${requestId}] syncPush: Received ${operations.length} ops from client ${clientId}`);
 
     const results = {
@@ -422,7 +416,7 @@ export const syncPushV2 = async (
       return orderA - orderB;
     });
     
-    console.log(`📦 [PUSH] Sorted ${sortedOperations.length} ops by dependency order`);
+    logger.info(`[${requestId}] syncPush: Sorted ${sortedOperations.length} ops by dependency order`);
 
     // Start transaction
     await client.query('BEGIN');
@@ -483,7 +477,9 @@ export const syncPushV2 = async (
         let applyResult: { success: boolean; error?: string };
         
         // Create savepoint before each operation
-        const savepointName = `sp_${opId.replace(/-/g, '_')}`;
+        // SECURITY: Sanitize savepoint name — only allow alphanumeric + underscore to prevent SQL injection
+        const sanitizedOpId = opId.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 63);
+        const savepointName = `sp_${sanitizedOpId}`;
         await client.query(`SAVEPOINT ${savepointName}`);
         
         try {
@@ -568,9 +564,8 @@ export const syncPushV2 = async (
       await client.query('COMMIT');
       
       logger.info(`[${requestId}] syncPush completed: ${results.ackOps.length} acked, ${results.errors.length} errors`);
-      console.log(`📤 [PUSH] Result: ${results.ackOps.length} OK, ${results.errors.length} FAILED`);
       if (results.errors.length > 0) {
-        console.log(`❌ [PUSH] Errors:`, results.errors);
+        logger.warn(`[${requestId}] syncPush errors:`, results.errors);
       }
       
       res.json({

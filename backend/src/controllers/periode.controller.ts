@@ -45,7 +45,6 @@ export const getPeriodes = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== PERIODES GET ALL REQUEST ===');
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;
@@ -65,8 +64,6 @@ export const getPeriodes = async (
       `SELECT * FROM periodes WHERE project_id = $1 AND deleted_at IS NULL ORDER BY numero ASC`,
       [projectId]
     );
-
-    console.log(`Found ${result.rows.length} periodes for project ${projectId}`);
 
     res.json({
       success: true,
@@ -122,18 +119,12 @@ export const createPeriode = async (
   next: NextFunction
 ) => {
   try {
-    console.log('=== PERIODE CREATE REQUEST ===');
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
-    console.log('User ID:', req.user?.id);
-    
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     // Accept projectId from params (URL) or body
     const projectIdFromParams = req.params.projectId;
     const { projectId: projectIdFromBody, numero, libelle, dateDebut, dateFin, statut, isDecompteDernier } = req.body;
     const projectId = projectIdFromParams || projectIdFromBody;
-    
-    console.log('Project ID:', projectId);
     
     if (!projectId) {
       throw new ApiError('Project ID is required', 400);
@@ -169,14 +160,11 @@ export const createPeriode = async (
       [projectId, req.user.id, numero, libelle, dateDebut, dateFin, statut || 'en_cours', isDecompteDernier || false]
     );
 
-    console.log('Periode created:', result.rows[0]?.id);
-
     res.status(201).json({
       success: true,
       data: snakeToCamel(result.rows[0]),
     });
   } catch (error: any) {
-    console.error('❌ Error creating periode:', error.message);
     logger.error('Error creating periode:', error);
     next(error);
   }
