@@ -36,6 +36,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Fix**: Backend route order corrected — thumbnail route now uses `authenticateStaticFiles` (supports both Bearer + Cookie) and is registered **before** `router.use(authenticate)`. Docker image rebuilt as v1.5.1.
 
+### 🐞 Bug Fix — Express Rate Limiter Crash Behind Nginx
+
+**Problem**: Backend container crashing with `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` when receiving requests through nginx reverse proxy.
+
+**Root Cause**: `express-rate-limit` requires `trust proxy` to be set when the app runs behind a reverse proxy that adds `X-Forwarded-For` headers.
+
+**Fix**: Added `app.set('trust proxy', 1)` in `backend/src/index.ts` before middleware initialization.
+
+### 🐞 Bug Fix — Album Creation 500 Error (Missing DB Columns)
+
+**Problem**: Creating or listing photo albums returned 500 Internal Server Error.
+
+**Root Cause**: `photo_albums` table was missing columns referenced by the album controller: `sort_order`, `color`, `icon`, `periode_id`.
+
+**Fix**: Added all 4 missing columns to `photo_albums` table in both production and staging databases. Formalized in migration 013.
+
 ---
 
 ## [1.5.0] - 2026-02-18

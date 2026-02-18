@@ -46,6 +46,9 @@ logger.info('All routes imported successfully');
 const app: Express = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust first proxy (nginx) — required for express-rate-limit to read X-Forwarded-For correctly
+app.set('trust proxy', 1);
+
 // Middleware
 // Configure helmet with security-hardened settings
 app.use(helmet({
