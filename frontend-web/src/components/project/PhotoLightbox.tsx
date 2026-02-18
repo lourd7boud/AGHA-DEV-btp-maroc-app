@@ -369,11 +369,11 @@ const PhotoLightbox: FC<PhotoLightboxProps> = ({ photos, initialIndex, onClose, 
         className="absolute inset-0 flex items-center justify-center overflow-hidden"
         style={{ cursor: zoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default' }}
         onClick={handleBackdropClick}
-        onMouseMove={handleMouseMove}
+        onMouseMove={(e) => { handleMouseMove(e); resetControlsTimer(); }}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
-        onTouchStart={handleTouchStart}
+        onTouchStart={(e) => { handleTouchStart(e); resetControlsTimer(); }}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
@@ -484,14 +484,6 @@ const PhotoLightbox: FC<PhotoLightboxProps> = ({ photos, initialIndex, onClose, 
           </div>
         )}
       </div>
-
-      {/* Mouse move listener for showing controls */}
-      <div
-        className="absolute inset-0 z-10"
-        onMouseMove={resetControlsTimer}
-        onClick={handleBackdropClick}
-        style={{ pointerEvents: 'none' }}
-      />
     </div>
   );
 };

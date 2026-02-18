@@ -496,13 +496,13 @@ const PhotosTab: FC<PhotosTabProps> = ({ projectId, photos, onRefresh }) => {
                   className={`group relative aspect-square bg-gray-100 rounded-lg overflow-hidden ${
                     selectionMode ? 'cursor-pointer' : ''
                   } ${selectedPhotoIds.has(photo.id) ? 'ring-4 ring-blue-500' : ''}`}
-                  onClick={selectionMode ? () => togglePhotoSelection(photo.id) : undefined}
+                  onClick={selectionMode ? () => togglePhotoSelection(photo.id) : () => setLightboxIndex(filteredPhotos.indexOf(photo))}
                 >
                   <img
                     src={assetService.getThumbnailUrl(photo.id, 'grid')}
                     alt={photo.originalName}
-                    className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                    onClick={!selectionMode ? () => setLightboxIndex(filteredPhotos.indexOf(photo)) : undefined}
+                    className="w-full h-full object-cover transition-transform group-hover:scale-105 cursor-pointer"
+
                     loading="lazy"
                     onError={(e) => {
                       // Fallback to original if thumbnail fails
