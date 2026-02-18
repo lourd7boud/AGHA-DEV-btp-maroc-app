@@ -4,6 +4,12 @@ import { useProject, useBordereaux, usePeriodes, useMetres } from '../hooks/useU
 import { ArrowLeft, Download, FileText } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { toDecimal, round2, toNumber } from '../utils/financeEngine';
+
+// 🔒 تقريب الكميات لرقمين - ROUND_HALF_UP via Decimal.js
+const roundQuantity = (value: number): number => {
+  return toNumber(round2(toDecimal(value)));
+};
 
 const AttachementPage: FC = () => {
   const { projectId: rawProjectId, periodeId: rawPeriodeId } = useParams<{ projectId: string; periodeId?: string }>();
@@ -79,15 +85,23 @@ const AttachementPage: FC = () => {
         return metreLineId === ligneId;
       });
 
-      // حساب المجموع التراكمي (totalPartiel من كل الفترات)
-      const quantiteCumulee = metresForLigne.reduce((sum: number, m: any) => 
-        sum + (Number(m.totalPartiel) || 0), 0);
+      // 🔒 FIX: جمع القياسات الخام من lignes ثم تقريب مرة واحدة فقط
+      // بدلاً من جمع totalPartiel المقرّبة مسبقاً (يسبب خطأ ±0.01)
+      const rawSum = metresForLigne.reduce((sum: number, m: any) => {
+        // استخدام lignes الخام إذا متوفرة
+        if (m.lignes && Array.isArray(m.lignes) && m.lignes.length > 0) {
+          return sum + m.lignes.reduce((s: number, l: any) => s + (Number(l.partiel) || 0), 0);
+        }
+        // fallback: استخدام totalPartiel
+        return sum + (Number(m.totalPartiel) || 0);
+      }, 0);
+      const quantiteCumulee = roundQuantity(rawSum);
       
       return {
         numero: index + 1,
         designation: ligne.designation,
         unite: ligne.unite || '',
-        quantiteCumulee: Number(quantiteCumulee) || 0,
+        quantiteCumulee,
       };
     }).filter(item => item.quantiteCumulee > 0); // Afficher seulement les lignes avec des quantités
   };

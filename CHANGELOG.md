@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.1] - 2026-02-18
+
+### 🐞 Bug Fix — Rounding Consistency (Attachment vs Métré vs Décompte)
+
+**Problem**: Attachment PDF showed quantity `2794.30` while Métré and Décompte showed `2794.29` for the same item.
+
+**Root Cause**: "Round-then-sum" vs "Sum-then-round" discrepancy. Attachment was summing pre-rounded `totalPartiel` values from each period, accumulating ±0.01 rounding errors. Additionally, `.toFixed(2)` (ROUND_HALF_EVEN) was used inconsistently alongside `roundQuantity()` (ROUND_HALF_UP via Decimal.js).
+
+**Fix** (3 files):
+- **AttachementPage.tsx**: Sum raw `lignes[].partiel` from all periods, then apply `roundQuantity()` once
+- **PeriodeDecomptePage.tsx**: Use `roundQuantity()` instead of `.toFixed(2)` for cumulative quantities
+- **MetrePage.tsx**: Apply `roundQuantity()` before display for "Réalisé" values
+
+**Rule enforced**: "Sum first, round once, always ROUND_HALF_UP"
+
+---
+
 ## [1.5.0] - 2026-02-18
 
 ### 🎯 Data Integrity & Financial Accuracy Release

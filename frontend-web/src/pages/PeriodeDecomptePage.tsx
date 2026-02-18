@@ -195,10 +195,11 @@ const PeriodeDecomptePage: FC = () => {
         console.log(`  📊 [CUMUL] ${key}: +${metreTotal.toFixed(2)} (période ${mPeriodeId}) → total = ${(currentSum + metreTotal).toFixed(2)}`);
       });
     
-    // تقريب جميع القيم لرقمين
+    // 🔒 FIX: تقريب ROUND_HALF_UP عبر Decimal.js (بدل .toFixed(2) = ROUND_HALF_EVEN)
+    const roundQuantity = (v: number): number => toNumber(round2(toDecimal(v)));
     const roundedQuantities = new Map<string, number>();
     quantitesByLigne.forEach((value, key) => {
-      roundedQuantities.set(key, Number(value.toFixed(2)));
+      roundedQuantities.set(key, roundQuantity(value));
     });
     
     console.log('🔴 [DECOMPTE CUMUL] Final cumulative quantities:', Object.fromEntries(roundedQuantities));

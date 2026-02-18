@@ -1997,7 +1997,7 @@ const MetrePage: FC = () => {
                       Bordereau: {Number(item.quantiteBordereau || 0).toLocaleString()}
                     </div>
                     <div className="text-lg font-bold text-primary-600">
-                      Réalisé: {Number(totalPartiel || 0).toFixed(2)}
+                      Réalisé: {roundQuantity(totalPartiel || 0).toFixed(2)}
                     </div>
                   </div>
 
