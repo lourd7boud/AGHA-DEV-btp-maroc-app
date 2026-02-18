@@ -72,7 +72,6 @@ const AlertsPanel: FC<AlertsPanelProps> = ({ alerts }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [activeCategory, setActiveCategory] = useState<CategoryKey>('all');
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
-  const [showAll, setShowAll] = useState(false);
 
   // Filter alerts
   const visibleAlerts = useMemo(() => {
@@ -89,8 +88,6 @@ const AlertsPanel: FC<AlertsPanelProps> = ({ alerts }) => {
     warning: alerts.filter(a => !dismissedIds.has(a.id) && a.type === 'warning').length,
     info: alerts.filter(a => !dismissedIds.has(a.id) && a.type === 'info').length,
   }), [alerts, dismissedIds]);
-
-  const displayedAlerts = showAll ? visibleAlerts : visibleAlerts.slice(0, 6);
 
   const dismiss = useCallback((id: string) => {
     setDismissedIds(prev => new Set([...prev, id]));
@@ -243,7 +240,7 @@ const AlertsPanel: FC<AlertsPanelProps> = ({ alerts }) => {
           </div>
 
           {/* Alerts List */}
-          <div className="px-5 py-3">
+          <div className="max-h-[400px] overflow-y-auto px-5 py-3" style={{ scrollbarWidth: 'thin' }}>
             {visibleAlerts.length === 0 ? (
               <div className="text-center py-8 text-gray-400">
                 <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-green-400" />
@@ -252,29 +249,9 @@ const AlertsPanel: FC<AlertsPanelProps> = ({ alerts }) => {
               </div>
             ) : (
               <div className="space-y-2">
-                {displayedAlerts.map((alert) => (
+                {visibleAlerts.map((alert) => (
                   <AlertCard key={alert.id} alert={alert} onDismiss={dismiss} />
                 ))}
-
-                {/* Show more */}
-                {!showAll && visibleAlerts.length > 6 && (
-                  <button
-                    onClick={() => setShowAll(true)}
-                    className="w-full py-2.5 text-center text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors font-medium"
-                  >
-                    Afficher {visibleAlerts.length - 6} alertes supplémentaires
-                    <ChevronDown className="w-4 h-4 inline ml-1" />
-                  </button>
-                )}
-                {showAll && visibleAlerts.length > 6 && (
-                  <button
-                    onClick={() => setShowAll(false)}
-                    className="w-full py-2.5 text-center text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
-                  >
-                    Réduire
-                    <ChevronUp className="w-4 h-4 inline ml-1" />
-                  </button>
-                )}
               </div>
             )}
           </div>
