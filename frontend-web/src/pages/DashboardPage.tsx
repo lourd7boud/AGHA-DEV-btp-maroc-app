@@ -5,6 +5,7 @@ import { useAuthStore } from '../store/authStore';
 import { useProjects } from '../hooks/useUnifiedData';
 import { apiService } from '../services/apiService';
 import { isWeb } from '../utils/platform';
+import AlertsPanel, { Alert } from '../components/dashboard/AlertsPanel';
 import {
   FolderKanban,
   CheckCircle2,
@@ -12,14 +13,10 @@ import {
   TrendingUp,
   Plus,
   AlertTriangle,
-  Bell,
   DollarSign,
   FileText,
   AlertCircle,
   Timer,
-  ChevronRight,
-  ChevronDown,
-  ChevronUp,
   Target,
   Zap,
   Shield,
@@ -29,21 +26,6 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { differenceInDays, addMonths } from 'date-fns';
-
-// Types pour les alertes
-interface Alert {
-  id: string;
-  type: 'danger' | 'warning' | 'info' | 'success';
-  icon: FC<{ className?: string }>;
-  title: string;
-  description: string;
-  action?: {
-    label: string;
-    path: string;
-  };
-  projectId?: string;
-  priority: number;
-}
 
 // Types pour les statistiques
 interface DashboardStats {
@@ -70,10 +52,7 @@ const DashboardPage: FC = () => {
   const canModify = isOnline || !isWeb();
   const cannotModifyReason = !isOnline && isWeb() ? 'Non disponible hors ligne' : null;
 
-  // � حالة طي/فتح الإشعارات
-  const [alertsExpanded, setAlertsExpanded] = useState(true);
-
-  // �🌐 Web: تحميل bordereaux و decompts من API لكل المشاريع
+  // 🌐 Web: تحميل bordereaux و decompts من API لكل المشاريع
   const [bordereaux, setBordereaux] = useState<any[]>([]);
   const [decompts, setDecompts] = useState<any[]>([]);
   
@@ -240,6 +219,8 @@ const DashboardPage: FC = () => {
 
     projects.forEach((project) => {
       const projectId = project.id.replace('project:', '');
+      const marcheNo = project.marcheNo || '';
+      const projectName = project.objet || '';
       
       // 1. Alerte: Délai dépassé
       if (project.status === 'active' && project.osc && project.delaisExecution) {
@@ -249,24 +230,34 @@ const DashboardPage: FC = () => {
         if (daysOverdue > 0) {
           alertsList.push({
             id: `overdue-${project.id}`,
-            type: 'danger',
+            type: 'critical',
+            category: 'deadline',
             icon: AlertTriangle,
             title: `Délai dépassé de ${daysOverdue} jours`,
-            description: `${project.objet} (${project.marcheNo})`,
+            description: `${project.objet} (${marcheNo})`,
+            detail: `Date fin prévue dépassée`,
             action: { label: 'Voir', path: `/projects/${projectId}` },
             projectId: project.id,
+            projectName,
+            marcheNo,
             priority: 1,
+            daysValue: daysOverdue,
           });
         } else if (daysOverdue > -30) {
           alertsList.push({
             id: `deadline-${project.id}`,
             type: 'warning',
+            category: 'deadline',
             icon: Timer,
             title: `Fin de délai dans ${Math.abs(daysOverdue)} jours`,
-            description: `${project.objet} (${project.marcheNo})`,
+            description: `${project.objet} (${marcheNo})`,
+            detail: `Échéance proche`,
             action: { label: 'Voir', path: `/projects/${projectId}` },
             projectId: project.id,
+            projectName,
+            marcheNo,
             priority: 2,
+            daysValue: daysOverdue,
           });
         }
       }
@@ -281,11 +272,15 @@ const DashboardPage: FC = () => {
             alertsList.push({
               id: `no-decompte-${project.id}`,
               type: 'warning',
+              category: 'finance',
               icon: DollarSign,
               title: 'Aucun décompte créé',
               description: `${project.objet}`,
+              detail: `Créé il y a ${daysSinceCreation} jours sans décompte`,
               action: { label: 'Créer', path: `/projects/${projectId}` },
               projectId: project.id,
+              projectName,
+              marcheNo,
               priority: 2,
             });
           }
@@ -299,11 +294,15 @@ const DashboardPage: FC = () => {
             alertsList.push({
               id: `old-decompte-${project.id}`,
               type: 'info',
+              category: 'finance',
               icon: Receipt,
-              title: `Décompte ancien (${daysSinceLastDecompte}j)`,
+              title: `Dernier décompte il y a ${daysSinceLastDecompte}j`,
               description: `${project.objet}`,
+              detail: `Pensez à créer un nouveau décompte`,
               action: { label: 'Nouveau', path: `/projects/${projectId}` },
               projectId: project.id,
+              projectName,
+              marcheNo,
               priority: 3,
             });
           }
@@ -320,12 +319,17 @@ const DashboardPage: FC = () => {
           alertsList.push({
             id: `garantie-${project.id}`,
             type: 'warning',
+            category: 'warranty',
             icon: Shield,
             title: `Fin garantie dans ${daysToGarantie}j`,
             description: `${project.objet}`,
+            detail: `Planifier la réception définitive`,
             action: { label: 'Planifier', path: `/projects/${projectId}/edit` },
             projectId: project.id,
+            projectName,
+            marcheNo,
             priority: 2,
+            daysValue: -daysToGarantie,
           });
         }
       }
@@ -340,12 +344,16 @@ const DashboardPage: FC = () => {
         if (projectBordereaux.length === 0) {
           alertsList.push({
             id: `no-bordereau-${project.id}`,
-            type: 'danger',
+            type: 'critical',
+            category: 'document',
             icon: FileText,
             title: 'Bordereau manquant',
             description: `${project.objet}`,
+            detail: `Le bordereau des prix est obligatoire`,
             action: { label: 'Créer', path: `/projects/${projectId}` },
             projectId: project.id,
+            projectName,
+            marcheNo,
             priority: 1,
           });
         }
@@ -435,26 +443,6 @@ const DashboardPage: FC = () => {
       // 🆕 عرض جميع المشاريع بدون حد
   }, [projects, decompts, bordereaux]);
 
-  const getAlertStyle = (type: Alert['type']) => {
-    const styles = {
-      danger: 'bg-red-50 border-red-200 text-red-800',
-      warning: 'bg-yellow-50 border-yellow-200 text-yellow-800',
-      info: 'bg-blue-50 border-blue-200 text-blue-800',
-      success: 'bg-green-50 border-green-200 text-green-800',
-    };
-    return styles[type];
-  };
-
-  const getAlertIconStyle = (type: Alert['type']) => {
-    const styles = {
-      danger: 'text-red-500',
-      warning: 'text-yellow-500',
-      info: 'text-blue-500',
-      success: 'text-green-500',
-    };
-    return styles[type];
-  };
-
   // Show loading state on Web when fetching from server
   if (isLoading && isWeb()) {
     return (
@@ -533,68 +521,8 @@ const DashboardPage: FC = () => {
         </div>
       </div>
 
-      {/* Alertes importantes - قابلة للطي */}
-      {alerts.length > 0 && (
-        <div className="card p-4">
-          <button
-            onClick={() => setAlertsExpanded(!alertsExpanded)}
-            className="w-full flex items-center justify-between"
-          >
-            <div className="flex items-center gap-2">
-              <Bell className="w-5 h-5 text-gray-700" />
-              <h2 className="text-lg font-semibold text-gray-900">
-                Alertes{' '}
-                <span className={`${alerts.length > 0 ? 'text-red-600 bg-red-100 px-2 py-0.5 rounded-full text-sm' : ''}`}>
-                  ({alerts.length})
-                </span>
-              </h2>
-            </div>
-            {alertsExpanded ? (
-              <ChevronUp className="w-5 h-5 text-gray-500" />
-            ) : (
-              <ChevronDown className="w-5 h-5 text-gray-500" />
-            )}
-          </button>
-          
-          {alertsExpanded && (
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {alerts.slice(0, 4).map((alert) => {
-                const Icon = alert.icon;
-                // 🆕 البحث عن المشروع للحصول على رقمه
-                const project = projects?.find(p => p.id === alert.projectId);
-                const marcheNo = project?.marcheNo || '';
-                return (
-                  <div
-                    key={alert.id}
-                    className={`p-4 rounded-lg border ${getAlertStyle(alert.type)} flex items-start gap-3`}
-                  >
-                    <Icon className={`w-5 h-5 mt-0.5 flex-shrink-0 ${getAlertIconStyle(alert.type)}`} />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium">{alert.title}</p>
-                      {/* 🆕 عرض رقم المشروع بدلاً من الاسم */}
-                      <p className="text-sm opacity-80 truncate font-semibold text-primary-700">{marcheNo}</p>
-                    </div>
-                    {alert.action && (
-                      <Link
-                        to={alert.action.path}
-                        className="flex-shrink-0 text-sm font-medium hover:underline flex items-center gap-1"
-                      >
-                        {alert.action.label}
-                        <ChevronRight className="w-4 h-4" />
-                      </Link>
-                    )}
-                  </div>
-                );
-              })}
-              {alerts.length > 4 && (
-                <p className="text-sm text-gray-500 col-span-2">
-                  + {alerts.length - 4} autres alertes
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Centre de notifications intelligent */}
+      <AlertsPanel alerts={alerts} />
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
