@@ -50,10 +50,11 @@ import {
   Decimal,
 } from '../utils/financeEngine';
 
-// 🔒 تقريب الكميات لرقمين - ROUND_HALF_UP
+// 🔒 تقريب الكميات لرقمين - ROUND_HALF_UP via Decimal.js
 // هذا الرقم المقرّب سيُستخدم في الديكونت
+// ⚠️ Math.round(x*100)/100 يُسبب أخطاء (مثل 2.675 → 2.67 بدل 2.68)
 const roundQuantity = (value: number): number => {
-  return Math.round(value * 100) / 100;
+  return toNumber(round2(toDecimal(value)));
 };
 
 // ============== INTERFACES ==============
@@ -853,8 +854,8 @@ const MetrePage: FC = () => {
       const previousDecompts = (allDecompts || [])
         .filter(d => !d.deletedAt && d.numero < currentPeriode.numero);
       
-      let depensesExercicesAnterieurs = 0;
-      let decomptesPrecedents = 0;
+      let depensesExercicesAnterieursDecimal = new Decimal(0);
+      let decomptesPrecedentsDecimal = new Decimal(0);
       const anneePeriodeActuelle = new Date(currentPeriode.dateDebut).getFullYear();
       
       for (const decompt of previousDecompts) {
@@ -866,14 +867,16 @@ const MetrePage: FC = () => {
         if (!periodeDecompt) continue;
         
         const anneeDecompt = new Date(periodeDecompt.dateDebut).getFullYear();
-        const montantAPrendre = (decompt as any).montantTotal || 0;
+        const montantAPrendre = toDecimal((decompt as any).montantTotal || 0);
         
         if (anneeDecompt < anneePeriodeActuelle) {
-          depensesExercicesAnterieurs += montantAPrendre;
+          depensesExercicesAnterieursDecimal = depensesExercicesAnterieursDecimal.plus(montantAPrendre);
         } else if (anneeDecompt === anneePeriodeActuelle) {
-          decomptesPrecedents += montantAPrendre;
+          decomptesPrecedentsDecimal = decomptesPrecedentsDecimal.plus(montantAPrendre);
         }
       }
+      const depensesExercicesAnterieurs = toNumber(depensesExercicesAnterieursDecimal);
+      const decomptesPrecedents = toNumber(decomptesPrecedentsDecimal);
 
       // حساب Retenue de Garantie: MIN(TRUNC(TTC×10%;2); TRUNC(Marché×7%;2))
       let montantMarcheTTC = new Decimal(0);
@@ -893,10 +896,9 @@ const MetrePage: FC = () => {
       const restes = ttcInternal.minus(retenueGarantie);
       const resteAPayer = restes.minus(toDecimal(depensesExercicesAnterieurs));
       
-      // 🔒 EXCEL: floating point conversion للمونتان
+      // 🔒 EXCEL: تقريب نهائي عبر Decimal.js
       const montantAcompteExact = resteAPayer.minus(toDecimal(decomptesPrecedents));
-      const montantAcompteFloat = montantAcompteExact.toNumber();
-      const montantAcompte = Number(montantAcompteFloat.toFixed(2));
+      const montantAcompte = toNumber(round2(montantAcompteExact));
 
       console.log('💰 [DECOMPTE] Financial calculations:', {
         totalTTC,
@@ -917,22 +919,75 @@ const MetrePage: FC = () => {
         lignes: decompteLines,
         montantTotal: montantAcompte,
         totalTTC: totalTTC,
+        totalGeneralTTC: totalTTC, // TTC تراكمي = نفس totalTTC لأنه محسوب تراكمياً
         statut: 'draft' as const,
       };
 
       if (isWeb()) {
-        if (existingDecompte) {
-          const rawDecomptId = existingDecompte.id.replace('decompt:', '');
+        // 🔒 FIX: Fresh query to find existing décompte (avoid stale hook state)
+        let freshDecompte = existingDecompte;
+        if (!freshDecompte) {
+          try {
+            const searchRes = await apiService.getDecompts(rawProjectId);
+            const allDecs = searchRes?.data || searchRes || [];
+            freshDecompte = allDecs.find((d: any) => {
+              const dPId = (d.periodeId || d.periode_id || '').replace('periode:', '');
+              return dPId === rawPeriodeId && !d.deletedAt && !d.deleted_at;
+            });
+            if (freshDecompte) {
+              console.log('🔒 [WEB] Found existing décompte via fresh query:', freshDecompte.id);
+            }
+          } catch (e) {
+            console.warn('⚠️ [WEB] Could not fetch fresh décomptes, using hook state');
+          }
+        }
+
+        if (freshDecompte) {
+          const rawDecomptId = freshDecompte.id.replace('decompt:', '');
           await apiService.updateDecompt(rawDecomptId, decompteData);
           console.log('✅ [WEB] Décompte updated:', rawDecomptId);
         } else {
-          await apiService.createDecompt(decompteData);
-          console.log('✅ [WEB] Décompte created');
+          try {
+            await apiService.createDecompt(decompteData);
+            console.log('✅ [WEB] Décompte created');
+          } catch (createError: any) {
+            // 🔒 If 409 (duplicate), find and update instead
+            if (createError?.response?.status === 409) {
+              console.warn('⚠️ [WEB] Décompte already exists (409), fetching and updating...');
+              const retryRes = await apiService.getDecompts(rawProjectId);
+              const allDecs = retryRes?.data || retryRes || [];
+              const dup = allDecs.find((d: any) => {
+                const dPId = (d.periodeId || d.periode_id || '').replace('periode:', '');
+                return dPId === rawPeriodeId && !d.deletedAt && !d.deleted_at;
+              });
+              if (dup) {
+                await apiService.updateDecompt(dup.id.replace('decompt:', ''), decompteData);
+                console.log('✅ [WEB] Décompte updated after 409 recovery:', dup.id);
+              }
+            } else {
+              throw createError;
+            }
+          }
         }
       } else {
-        // Electron mode
-        if (existingDecompte) {
-          await db.decompts.update(existingDecompte.id, {
+        // Electron mode — 🔒 FIX: Fresh query from IndexedDB
+        let freshDecompte = existingDecompte;
+        if (!freshDecompte) {
+          const allLocalDecompts = await db.decompts
+            .where('projectId').equals(projectId)
+            .filter((d: any) => !d.deletedAt)
+            .toArray();
+          freshDecompte = allLocalDecompts.find((d: any) => {
+            const dPId = d.periodeId?.includes(':') ? d.periodeId : `periode:${d.periodeId}`;
+            return dPId === periodeId;
+          });
+          if (freshDecompte) {
+            console.log('🔒 [ELECTRON] Found existing décompte via fresh query:', freshDecompte.id);
+          }
+        }
+
+        if (freshDecompte) {
+          await db.decompts.update(freshDecompte.id, {
             lignes: decompteLines,
             montantTotal: montantAcompte,
             totalTTC: totalTTC,
@@ -942,7 +997,7 @@ const MetrePage: FC = () => {
           await logSyncOperation(
             'UPDATE',
             'decompt',
-            existingDecompte.id.replace('decompt:', ''),
+            freshDecompte.id.replace('decompt:', ''),
             { montantTotal: montantAcompte, totalTTC, lignesCount: decompteLines.length },
             user.id
           );
@@ -1346,43 +1401,33 @@ const MetrePage: FC = () => {
     return ht * 1.2;
   };
 
-  // 🔧 Total Général TTC réalisé (من آخر ديكونت - لأن كل ديكونت تراكمي)
+  // 🔧 Total Général TTC réalisé — حساب تراكمي مباشر من البيانات الحالية
+  // cumulPrecedent (كميات الفترات السابقة) + partiel الفترة الحالية = الكمية التراكمية الكلية
+  // ثم نضربها في سعر الوحدة ونضيف TVA 20%
   const getTotalGeneralTTC = () => {
-    if (!allDecompts || allDecompts.length === 0) return 0;
+    if (!metresQuick || metresQuick.length === 0) return 0;
     
-    // 🔧 FIX: إيجاد آخر ديكونت (الأعلى رقماً) الذي يحتوي على قيم فعلية
-    // قد تكون هناك ديكونتات مكررة بنفس الرقم بعضها فارغ
-    const maxNumero = Math.max(...allDecompts.map((d: any) => d.numero || 0));
+    let totalHTCumule = 0;
     
-    // تصفية الديكونتات بالرقم الأعلى
-    const decomptesWithMaxNumero = allDecompts.filter((d: any) => d.numero === maxNumero);
+    for (const item of metresQuick) {
+      // كمية الفترة الحالية
+      const totalPartielCurrentPeriode = item.lignes
+        .filter((l: any) => l.isFromPreviousPeriode !== true)
+        .reduce((s: number, l: any) => s + (Number(l.partiel) || 0), 0);
+      
+      // الكمية التراكمية = الفترات السابقة + الفترة الحالية
+      const cumulPrecedent = Number(item.cumulPrecedent) || 0;
+      const quantiteCumulative = cumulPrecedent + totalPartielCurrentPeriode;
+      
+      // المبلغ HT التراكمي لهذا السطر
+      const montantHT = quantiteCumulative * item.prixUnitaire;
+      totalHTCumule += montantHT;
+    }
     
-    // اختيار الديكونت الذي يحتوي على قيم (ليس فارغاً)
-    const dernierDecompte = decomptesWithMaxNumero.reduce((best: any, d: any) => {
-      const dValue = Number(d.totalGeneralTtc || d.totalTtc || d.montantTotal || d.montantCumule || 0);
-      const bestValue = Number(best?.totalGeneralTtc || best?.totalTtc || best?.montantTotal || best?.montantCumule || 0);
-      return dValue > bestValue ? d : best;
-    }, decomptesWithMaxNumero[0]);
+    // TTC = HT × 1.2 (TVA 20%)
+    const totalTTC = totalHTCumule * 1.2;
     
-    // 🔧 استخدام totalGeneralTtc (snake_case -> camelCase من Backend)
-    // Backend يحول total_general_ttc إلى totalGeneralTtc
-    // ⚠️ FIX: إضافة montantTotal و montantCumule كـ fallback للديكونتات القديمة
-    const value = dernierDecompte?.totalGeneralTtc || 
-                  dernierDecompte?.totalTtc || 
-                  dernierDecompte?.montantTotal ||
-                  dernierDecompte?.montantCumule ||
-                  0;
-    console.log('[getTotalGeneralTTC] Dernier décompte:', {
-      maxNumero,
-      decomptesCount: decomptesWithMaxNumero.length,
-      numero: dernierDecompte?.numero,
-      totalGeneralTtc: dernierDecompte?.totalGeneralTtc,
-      totalTtc: dernierDecompte?.totalTtc,
-      montantTotal: dernierDecompte?.montantTotal,
-      montantCumule: dernierDecompte?.montantCumule,
-      valueUsed: value
-    });
-    return Number(value);
+    return totalTTC;
   };
 
   // 🔧 Montant restant (TTC marché - TTC réalisé)

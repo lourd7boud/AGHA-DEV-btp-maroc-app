@@ -202,6 +202,27 @@ class AssetService {
   }
 
   /**
+   * Get thumbnail URL for an image asset (much smaller, faster loading)
+   * Uses the API endpoint which generates/caches WebP thumbnails
+   * @param assetId - The asset UUID
+   * @param size - 'grid' (400px) or 'preview' (800px)
+   */
+  getThumbnailUrl(assetId: string, size: 'grid' | 'preview' = 'grid'): string {
+    const basePath = `/api/assets/${assetId}/thumbnail?size=${size}`;
+    
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.isElectron) {
+      const electronApiUrl = (window as any).electronAPI.apiUrl || 'https://marocinfra.com';
+      return `${electronApiUrl}${basePath}`;
+    }
+    
+    if (typeof window !== 'undefined' && window.location.protocol !== 'file:') {
+      return `${window.location.origin}${basePath}`;
+    }
+    
+    return basePath;
+  }
+
+  /**
    * Format file size for display
    */
   formatFileSize(bytes: number): string {

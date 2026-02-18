@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import pool from '../config/postgres';
+import logger from '../utils/logger';
 
 const router = Router();
 
@@ -77,6 +78,32 @@ router.get('/ready', async (req: Request, res: Response) => {
     res.status(200).json({ status: 'ready' });
   } catch (error) {
     res.status(503).json({ status: 'not ready', error: 'Database unavailable' });
+  }
+});
+
+// POST /api/health/client-error - Receive frontend error reports
+router.post('/client-error', (req: Request, res: Response): void => {
+  try {
+    const { errors } = req.body;
+    if (!Array.isArray(errors) || errors.length === 0) {
+      res.status(400).json({ success: false });
+      return;
+    }
+
+    // Log each client error (limit to 20 per request to prevent abuse)
+    const limited = errors.slice(0, 20);
+    for (const entry of limited) {
+      logger.warn('Client error', {
+        level: entry.level,
+        clientMessage: entry.message?.substring(0, 500),
+        clientUrl: entry.url,
+        timestamp: entry.timestamp,
+      });
+    }
+
+    res.json({ success: true, received: limited.length });
+  } catch (error) {
+    res.status(500).json({ success: false });
   }
 });
 

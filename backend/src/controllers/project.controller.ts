@@ -164,19 +164,73 @@ export const getProjects = async (
     }
 
     const pool = getPool();
-    const { status } = req.query;
+    const { status, search, page, limit: limitParam, sort, order } = req.query;
+
+    // Pagination params (backwards-compatible: no page = return all)
+    const isPaginated = page !== undefined;
+    const pageNum = Math.max(1, parseInt(page as string) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(limitParam as string) || 20));
+    const offset = (pageNum - 1) * pageSize;
+
+    // Sort params
+    const allowedSortFields: Record<string, string> = {
+      created_at: 'created_at', date: 'created_at',
+      marche_no: 'marche_no', objet: 'objet',
+      montant: 'montant', status: 'status',
+      updated_at: 'updated_at',
+    };
+    const sortField = allowedSortFields[(sort as string)?.toLowerCase()] || 'created_at';
+    const sortOrder = (order as string)?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
     let query = `SELECT * FROM projects WHERE user_id = $1 AND deleted_at IS NULL`;
+    let countQuery = `SELECT COUNT(*) FROM projects WHERE user_id = $1 AND deleted_at IS NULL`;
     const params: any[] = [req.user.id];
+    const countParams: any[] = [req.user.id];
+    let paramIndex = 2;
 
     if (status) {
-      query += ` AND status = $2`;
+      query += ` AND status = $${paramIndex}`;
+      countQuery += ` AND status = $${paramIndex}`;
       params.push(status);
+      countParams.push(status);
+      paramIndex++;
     }
 
-    query += ` ORDER BY created_at DESC`;
+    // Search across multiple fields
+    if (search && typeof search === 'string' && search.trim().length > 0) {
+      const searchTerm = `%${search.trim()}%`;
+      query += ` AND (
+        objet ILIKE $${paramIndex} OR 
+        marche_no ILIKE $${paramIndex} OR 
+        societe ILIKE $${paramIndex} OR 
+        commune ILIKE $${paramIndex} OR 
+        programme ILIKE $${paramIndex}
+      )`;
+      countQuery += ` AND (
+        objet ILIKE $${paramIndex} OR 
+        marche_no ILIKE $${paramIndex} OR 
+        societe ILIKE $${paramIndex} OR 
+        commune ILIKE $${paramIndex} OR 
+        programme ILIKE $${paramIndex}
+      )`;
+      params.push(searchTerm);
+      countParams.push(searchTerm);
+      paramIndex++;
+    }
 
-    const result = await pool.query(query, params);
+    query += ` ORDER BY ${sortField} ${sortOrder}`;
+
+    if (isPaginated) {
+      query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+      params.push(pageSize, offset);
+    }
+
+    const [result, countResult] = await Promise.all([
+      pool.query(query, params),
+      isPaginated ? pool.query(countQuery, countParams) : Promise.resolve(null),
+    ]);
+
+    const totalCount = countResult ? parseInt(countResult.rows[0].count) : result.rows.length;
 
     logger.info(`Fetched ${result.rows.length} projects for user ${req.user.id}`);
 
@@ -222,6 +276,15 @@ export const getProjects = async (
       success: true,
       data: projects,
       count: projects.length,
+      ...(isPaginated && {
+        pagination: {
+          page: pageNum,
+          limit: pageSize,
+          total: totalCount,
+          totalPages: Math.ceil(totalCount / pageSize),
+          hasMore: pageNum * pageSize < totalCount,
+        },
+      }),
     });
   } catch (error) {
     logger.error('Error fetching projects:', error);

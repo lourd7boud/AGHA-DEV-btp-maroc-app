@@ -16,6 +16,7 @@ import {
   uploadPV,
   deleteAsset,
   getAssetCounts,
+  getAssetThumbnail,
 } from '../controllers/asset.controller';
 
 const router = Router();
@@ -111,5 +112,12 @@ router.post('/project/:projectId/pv/upload', upload.array('files', 10), uploadPV
  * Soft delete an asset
  */
 router.delete('/:assetId', deleteAsset);
+
+/**
+ * GET /api/assets/:assetId/thumbnail
+ * Serve a thumbnail for an image asset
+ * Query params: ?size=grid|preview (default: grid)
+ */
+router.get('/:assetId/thumbnail', getAssetThumbnail);
 
 export default router;

@@ -737,8 +737,27 @@ const PeriodeDecomptePage: FC = () => {
           await apiService.updateDecompt(rawDecomptId, decompteData);
           console.log('✅ [WEB] Décompte updated:', rawDecomptId);
         } else {
-          await apiService.createDecompt(decompteData);
-          console.log('✅ [WEB] Décompte created');
+          try {
+            await apiService.createDecompt(decompteData);
+            console.log('✅ [WEB] Décompte created');
+          } catch (createError: any) {
+            // 🔒 If 409 (duplicate), find and update instead
+            if (createError?.response?.status === 409) {
+              console.warn('⚠️ [WEB] Décompte already exists (409), fetching and updating...');
+              const retryRes = await apiService.getDecompts(rawProjectId);
+              const allDecs = retryRes?.data || retryRes || [];
+              const dup = allDecs.find((d: any) => {
+                const dPId = (d.periodeId || d.periode_id || '').replace('periode:', '');
+                return dPId === rawPeriodeId && !d.deletedAt && !d.deleted_at;
+              });
+              if (dup) {
+                await apiService.updateDecompt(dup.id.replace('decompt:', ''), decompteData);
+                console.log('✅ [WEB] Décompte updated after 409 recovery:', dup.id);
+              }
+            } else {
+              throw createError;
+            }
+          }
         }
 
         // إعادة تحميل البيانات

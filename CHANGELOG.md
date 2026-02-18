@@ -13,6 +13,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0] - 2026-02-18
+
+### 🎯 Data Integrity & Financial Accuracy Release
+
+Critical release focused on fixing calculation precision issues, preventing data corruption (duplicate décomptes), and hardening security. All changes tested on staging (dev.marocinfra.com) before production deployment.
+
+### 🐞 Bug Fixes
+
+#### 🧮 Calculation Precision (IEEE 754 → Decimal.js)
+- **`roundQuantity`** now uses Decimal.js ROUND_HALF_UP instead of `Math.round` — fixes rounding errors like `2.675 → 2.67` (should be `2.68`)
+- **`calculatePartiel`** in metreCalculations.ts — all dimension arithmetic (L×l×P×N) now via Decimal.js
+- **`safeRound2`** in ProjectDetailPage — price revision amounts use Decimal.js wrapping
+- **PDF Export** now uses pre-calculated `montantHT` from décompte data instead of recalculating (prevents display vs PDF mismatch)
+- **`totalGeneralTTC`** display — now computed in real-time from cumulative quantities instead of reading from stale décompte data (was showing 0.00 DH)
+
+#### 🛡️ Data Integrity (Duplicate Décomptes)
+- **Fresh query before save** — MetrePage now queries DB directly before saving to avoid stale React hook state creating duplicates
+- **409 conflict recovery** — Both MetrePage and PeriodeDecomptePage catch duplicate errors and gracefully update existing records instead
+- **Sync controller** — Duplicate detection before INSERT: checks `(project_id, periode_id)` for décomptes and `(project_id, numero)` for périodes
+- **Decompt controller** — Added période existence validation and duplicate checks (409 response)
+
+#### 🔐 Security
+- **Cookie auth for static files** — `<img>` tags now authenticate via `auth_token` cookie (images were broken without Bearer token)
+- **Refresh token** was using wrong secret (`JWT_SECRET` instead of `JWT_REFRESH_SECRET`)
+- **JWT algorithm restriction** — Prevents `alg:none` attack vector
+
+### ✨ New Features
+
+#### 📊 Data Integrity API
+- `GET /api/integrity/check` — Comprehensive health report (orphans, duplicates, mismatches)
+- `POST /api/integrity/fix` — Auto-fix data issues (soft-delete orphans, remove duplicates, correct numeros)
+- `GET /api/integrity/project/:id` — Per-project detailed diagnostic
+
+#### 🎨 Professional Sidebar
+- Fixed position — stays visible during page scroll
+- Dark professional theme (slate-900 gradient)
+- Collapsible with icon tooltips when minimized
+- Active page indicator with blue accent bar
+
+#### 🖼️ Thumbnail Service
+- WebP thumbnails generated on upload (400×400 grid, 800×800 preview)
+- Cached lazily for performance
+
+#### 🔒 Security Hardening
+- CORS whitelist (no more wildcard `*`)
+- Rate limiting (global 1000/15min, auth 20/15min, sync 30/min)
+- Body size limit reduced 500MB → 50MB
+- Bcrypt rounds increased 10 → 12
+- JWT expiry reduced (access 24h, refresh 7d)
+- Helmet CSP hardened
+- Zod input validation schemas
+
+### 🧹 Refactoring
+- Production builds strip `console.log` and `debugger` statements
+- Vite chunk splitting (vendor-react, vendor-ui, vendor-pdf, vendor-utils)
+- ErrorBoundary wrapper for crash recovery
+- Price Revision Engine v1 deprecated (v2 is active)
+
+### 📦 Database Migration
+- **012_decompt_integrity.sql** — Cleans existing duplicates, adds UNIQUE constraints:
+  - `(project_id, periode_id)` on decompts
+  - `(project_id, numero)` on decompts
+  - `(project_id, numero)` on periodes
+
+### ⚠️ Notes
+- Users will need to re-login after this update (JWT expiry change)
+- No data loss — duplicate cleanup uses soft-delete only
+
+---
+
 ## [1.4.0] - 2026-02-13
 
 ### ✨ New Features & UI Enhancements

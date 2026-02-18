@@ -44,6 +44,16 @@ router.get('/me', authenticate, getCurrentUser);
 router.post('/refresh', validate({ body: refreshTokenSchema }), refreshToken);
 
 /**
+ * @route   POST /api/auth/logout
+ * @desc    Logout user (clears auth cookie)
+ * @access  Public
+ */
+router.post('/logout', (req, res) => {
+  res.clearCookie('auth_token', { path: '/' });
+  res.json({ success: true, message: 'Logged out successfully' });
+});
+
+/**
  * @route   GET /api/auth/users
  * @desc    Get all users (admin only)
  * @access  Private

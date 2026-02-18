@@ -3,12 +3,13 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
+import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { ensureJsonResponse } from './middleware/jsonOnly';
-import { authenticate, AuthRequest } from './middleware/auth';
+import { authenticate, authenticateStaticFiles, AuthRequest } from './middleware/auth';
 import logger from './utils/logger';
 import { initPostgres } from './config/postgres';
 import { initSocketServer, setupRealtimeTriggers } from './realtime';
@@ -36,6 +37,7 @@ import revisionRoutes from './routes/revision.routes';
 import indexManagementRoutes from './routes/indexManagement.routes';
 import albumRoutes from './routes/album.routes';
 import dashboardRoutes from './routes/dashboard.routes';
+import integrityRoutes from './routes/integrity.routes';
 
 logger.info('All routes imported successfully');
 
@@ -84,6 +86,7 @@ app.use(cors({
   },
   credentials: true,
 }));
+app.use(cookieParser());
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (message) => logger.info(message.trim()) } }));
 
@@ -121,9 +124,11 @@ const syncLimiter = rateLimit({
 
 app.use('/api/', globalLimiter);
 
-// SECURITY: Static files behind authentication — was publicly accessible
-app.use('/uploads', authenticate, (req: Request, res, next) => {
+// SECURITY: Static files behind authentication — supports cookie-based auth for <img> tags
+app.use('/uploads', authenticateStaticFiles, (req: Request, res, next) => {
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  // Cache static files for 1 hour to improve performance
+  res.setHeader('Cache-Control', 'private, max-age=3600');
   next();
 }, express.static('uploads'));
 
@@ -154,6 +159,7 @@ app.use('/api/revision', revisionRoutes);
 app.use('/api/index-management', indexManagementRoutes);
 app.use('/api/albums', albumRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/integrity', integrityRoutes);
 
 // Error handling
 app.use(notFound);

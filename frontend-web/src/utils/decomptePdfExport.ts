@@ -285,7 +285,7 @@ export async function generateDecomptePDF(
     ligne.unite,
     ligne.quantiteRealisee.toFixed(2),
     ligne.prixUnitaireHT.toFixed(2),
-    (ligne.quantiteRealisee * ligne.prixUnitaireHT).toFixed(2),
+    ligne.montantHT.toFixed(2),
   ]);
 
   let footerStartX = 0;

@@ -14,6 +14,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import logger from '../utils/logger';
 import PDFDocument from 'pdfkit';
+import { generateAllThumbnails, getOrGenerateThumbnail, isThumbnailable, THUMBNAIL_SIZES } from '../utils/thumbnailService';
 
 // Valid asset types
 type AssetType = 'photo' | 'pv' | 'document';
@@ -48,9 +49,15 @@ export const listAssets = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { projectId } = req.params;
-    const { type } = req.query;
+    const { type, search, page, limit: limitParam } = req.query;
 
     const pool = getPool();
+
+    // Pagination (backwards-compatible)
+    const isPaginated = page !== undefined;
+    const pageNum = Math.max(1, parseInt(page as string) || 1);
+    const pageSize = Math.min(200, Math.max(1, parseInt(limitParam as string) || 50));
+    const offset = (pageNum - 1) * pageSize;
 
     // Build query
     let query = `
@@ -59,16 +66,44 @@ export const listAssets = async (
       LEFT JOIN users u ON pa.created_by = u.id
       WHERE pa.project_id = $1 AND pa.deleted_at IS NULL
     `;
+    let countQuery = `
+      SELECT COUNT(*) FROM project_assets pa
+      WHERE pa.project_id = $1 AND pa.deleted_at IS NULL
+    `;
     const params: any[] = [projectId];
+    const countParams: any[] = [projectId];
+    let paramIndex = 2;
 
     if (type && ['photo', 'pv', 'document'].includes(type as string)) {
-      query += ` AND pa.type = $2`;
+      query += ` AND pa.type = $${paramIndex}`;
+      countQuery += ` AND pa.type = $${paramIndex}`;
       params.push(type);
+      countParams.push(type);
+      paramIndex++;
+    }
+
+    // Search by original filename
+    if (search && typeof search === 'string' && search.trim().length > 0) {
+      query += ` AND pa.original_name ILIKE $${paramIndex}`;
+      countQuery += ` AND pa.original_name ILIKE $${paramIndex}`;
+      params.push(`%${search.trim()}%`);
+      countParams.push(`%${search.trim()}%`);
+      paramIndex++;
     }
 
     query += ` ORDER BY pa.created_at DESC`;
 
-    const result = await pool.query(query, params);
+    if (isPaginated) {
+      query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+      params.push(pageSize, offset);
+    }
+
+    const [result, countResult] = await Promise.all([
+      pool.query(query, params),
+      isPaginated ? pool.query(countQuery, countParams) : Promise.resolve(null),
+    ]);
+
+    const totalCount = countResult ? parseInt(countResult.rows[0].count) : result.rows.length;
 
     // Transform to camelCase
     const assets = result.rows.map(row => ({
@@ -94,6 +129,15 @@ export const listAssets = async (
       success: true,
       data: assets,
       count: assets.length,
+      ...(isPaginated && {
+        pagination: {
+          page: pageNum,
+          limit: pageSize,
+          total: totalCount,
+          totalPages: Math.ceil(totalCount / pageSize),
+          hasMore: pageNum * pageSize < totalCount,
+        },
+      }),
     });
   } catch (error) {
     logger.error('Error listing assets:', error);
@@ -180,6 +224,13 @@ export const uploadAsset = async (
     const asset = result.rows[0];
 
     logger.info(`Asset uploaded: ${assetId} (${type})`);
+
+    // Generate thumbnails in background for images
+    if (type === 'photo' && isThumbnailable(req.file.mimetype)) {
+      generateAllThumbnails(destPath).catch(err =>
+        logger.warn(`Background thumbnail generation failed: ${err.message}`)
+      );
+    }
 
     res.status(201).json({
       success: true,
@@ -278,6 +329,13 @@ export const uploadMultiplePhotos = async (
           fileSize: result.rows[0].file_size,
           albumId: result.rows[0].album_id,
         });
+
+        // Generate thumbnails in background (non-blocking)
+        if (isThumbnailable(file.mimetype)) {
+          generateAllThumbnails(destPath).catch(err =>
+            logger.warn(`Background thumbnail generation failed: ${err.message}`)
+          );
+        }
       } catch (fileError) {
         logger.error(`Error processing file ${file.originalname}:`, fileError);
       }
@@ -864,6 +922,53 @@ export const deleteAsset = async (
     });
   } catch (error) {
     logger.error('Error deleting asset:', error);
+    next(error);
+  }
+};
+
+/**
+ * Serve a thumbnail for an asset
+ * GET /api/assets/:assetId/thumbnail?size=grid|preview
+ */
+export const getAssetThumbnail = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) throw new ApiError('Not authenticated', 401);
+
+    const { assetId } = req.params;
+    const size = (req.query.size as string) || 'grid';
+
+    if (!THUMBNAIL_SIZES[size]) {
+      throw new ApiError(`Invalid size. Must be one of: ${Object.keys(THUMBNAIL_SIZES).join(', ')}`, 400);
+    }
+
+    const pool = getPool();
+    const result = await pool.query(
+      'SELECT storage_path, mime_type FROM project_assets WHERE id = $1 AND deleted_at IS NULL',
+      [assetId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new ApiError('Asset not found', 404);
+    }
+
+    const { storage_path, mime_type } = result.rows[0];
+
+    if (!isThumbnailable(mime_type)) {
+      throw new ApiError('Asset is not an image', 400);
+    }
+
+    const thumbPath = await getOrGenerateThumbnail(storage_path, size);
+
+    // Set caching headers — thumbnails are immutable (content-addressed)
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('Content-Type', 'image/webp');
+    res.sendFile(thumbPath);
+  } catch (error) {
+    logger.error('Error serving thumbnail:', error);
     next(error);
   }
 };

@@ -111,7 +111,7 @@ export const updateMetreSchema = z.object({
 
 export const createDecomptSchema = z.object({
   projectId: z.string().min(1, 'Project ID is required'),
-  periodeId: z.string().optional(),
+  periodeId: z.string().min(1, 'Période ID is required'),  // 🔒 REQUIRED — no orphan décomptes
   numero: z.union([z.string(), z.number()]),
   montantCumule: z.number().optional().default(0),
   montantActuel: z.number().optional().default(0),

@@ -498,11 +498,19 @@ const PhotosTab: FC<PhotosTabProps> = ({ projectId, photos, onRefresh }) => {
                   onClick={selectionMode ? () => togglePhotoSelection(photo.id) : undefined}
                 >
                   <img
-                    src={assetService.getAssetUrl(photo.storagePath)}
+                    src={assetService.getThumbnailUrl(photo.id, 'grid')}
                     alt={photo.originalName}
                     className="w-full h-full object-cover transition-transform group-hover:scale-105"
                     onClick={!selectionMode ? () => setSelectedPhoto(photo) : undefined}
                     loading="lazy"
+                    onError={(e) => {
+                      // Fallback to original if thumbnail fails
+                      const target = e.target as HTMLImageElement;
+                      if (!target.dataset.fallback) {
+                        target.dataset.fallback = '1';
+                        target.src = assetService.getAssetUrl(photo.storagePath);
+                      }
+                    }}
                   />
                   
                   {/* Selection Checkbox */}

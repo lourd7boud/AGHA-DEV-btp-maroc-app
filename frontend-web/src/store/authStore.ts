@@ -143,6 +143,8 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
+        // Clear auth cookie on server (fire-and-forget)
+        apiService.post('/auth/logout', {}).catch(() => {});
         localStorage.removeItem('authToken');
         localStorage.removeItem('lastSyncTimestamp');
         localStorage.removeItem('auth-storage');

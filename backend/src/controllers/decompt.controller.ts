@@ -37,6 +37,10 @@ export const createDecompt = async (
       throw new ApiError('Project ID and numero required', 400);
     }
 
+    if (!periodeId) {
+      throw new ApiError('Période ID is required — un décompte doit être lié à une période', 400);
+    }
+
     const pool = getPool();
     const decomptId = uuidv4();
 
@@ -50,6 +54,16 @@ export const createDecompt = async (
       throw new ApiError('Project not found or not authorized', 404);
     }
 
+    // 🔒 Validate période exists and belongs to the SAME project
+    const periodeCheck = await pool.query(
+      'SELECT id FROM periodes WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL',
+      [periodeId, projectId]
+    );
+
+    if (periodeCheck.rows.length === 0) {
+      throw new ApiError('Période non trouvée ou n\'appartient pas à ce projet', 404);
+    }
+
     // 🔒 Check for duplicate: prevent duplicate decompt with same numero for same project
     const duplicateCheck = await pool.query(
       'SELECT id FROM decompts WHERE project_id = $1 AND numero = $2 AND deleted_at IS NULL',
@@ -58,6 +72,16 @@ export const createDecompt = async (
 
     if (duplicateCheck.rows.length > 0) {
       throw new ApiError(`Un décompte N°${numero} existe déjà pour ce projet. Veuillez utiliser un numéro différent.`, 409);
+    }
+
+    // 🔒 Check for duplicate: prevent multiple decompts for the same période
+    const periodeDecomptCheck = await pool.query(
+      'SELECT id, numero FROM decompts WHERE project_id = $1 AND periode_id = $2 AND deleted_at IS NULL',
+      [projectId, periodeId]
+    );
+
+    if (periodeDecomptCheck.rows.length > 0) {
+      throw new ApiError(`Un décompte existe déjà pour cette période (N°${periodeDecomptCheck.rows[0].numero}). Chaque période ne peut avoir qu'un seul décompte.`, 409);
     }
 
     const result = await pool.query(

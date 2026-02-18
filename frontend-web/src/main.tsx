@@ -4,8 +4,12 @@ import { HashRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
+import { installGlobalErrorHandlers } from './utils/logger';
 import './i18n';
 import './index.css';
+
+// Install global error tracking (unhandled errors + promise rejections)
+installGlobalErrorHandlers();
 
 // SECURITY: Only expose debug utilities in development mode
 if (import.meta.env.DEV && typeof window !== 'undefined') {

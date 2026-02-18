@@ -1,4 +1,5 @@
 // Constantes pour les calculs de métré
+import { toDecimal, round2, toNumber } from './financeEngine';
 
 export type UniteType = 'M³' | 'ML' | 'M²' | 'KG' | 'T' | 'U' | 'ENS' | 'M';
 export type CalculationType = 'volume' | 'surface' | 'lineaire' | 'poids' | 'unite';
@@ -108,6 +109,7 @@ export function getPoidsUnitaire(diametre: number): number {
 }
 
 // Fonction pour calculer le partiel d'une ligne de métré
+// 🔒 Utilise Decimal.js pour éviter les erreurs IEEE 754
 export function calculatePartiel(
   unite: UniteType,
   longueur?: number,
@@ -120,49 +122,49 @@ export function calculatePartiel(
   const calcType = CALCULATION_TYPES_CONFIG[unite];
   
   // Le multiplicateur par défaut est 1 si non spécifié
-  const multiplier = nombreSemblables && nombreSemblables > 0 ? nombreSemblables : 1;
+  const multiplier = toDecimal(nombreSemblables && nombreSemblables > 0 ? nombreSemblables : 1);
   
-  let result = 0;
+  let result = toDecimal(0);
   
   switch (calcType.type) {
     case 'volume':
-      result = (longueur || 0) * (largeur || 0) * (profondeur || 0);
+      result = toDecimal(longueur || 0).times(toDecimal(largeur || 0)).times(toDecimal(profondeur || 0));
       break;
       
     case 'surface':
-      result = (longueur || 0) * (largeur || 0);
+      result = toDecimal(longueur || 0).times(toDecimal(largeur || 0));
       break;
       
     case 'lineaire':
-      result = longueur || 0;
+      result = toDecimal(longueur || 0);
       break;
       
     case 'poids': {
-      const poidsUnitaire = getPoidsUnitaire(diametre || 0);
-      const totalKg = (nombre || 0) * (longueur || 0) * poidsUnitaire;
-      result = unite === 'T' ? totalKg / 1000 : totalKg;
+      const poidsUnitaire = toDecimal(getPoidsUnitaire(diametre || 0));
+      const totalKg = toDecimal(nombre || 0).times(toDecimal(longueur || 0)).times(poidsUnitaire);
+      result = unite === 'T' ? totalKg.dividedBy(1000) : totalKg;
       break;
     }
       
     case 'unite':
-      result = nombre || 0;
+      result = toDecimal(nombre || 0);
       break;
       
     default:
-      result = 0;
+      result = toDecimal(0);
   }
   
   // Multiplier par le nombre de parties semblables
-  return result * multiplier;
+  return toNumber(result.times(multiplier));
 }
 
 // Fonction pour formater un nombre avec décimales
 export function formatNumber(value: number, decimals: number = 2): string {
-  return value.toFixed(decimals);
+  return toNumber(round2(toDecimal(value))).toFixed(decimals);
 }
 
 // Fonction pour calculer le pourcentage de réalisation
 export function calculatePourcentage(realise: number, prevu: number): number {
   if (prevu === 0) return 0;
-  return (realise / prevu) * 100;
+  return toNumber(toDecimal(realise).dividedBy(toDecimal(prevu)).times(100));
 }

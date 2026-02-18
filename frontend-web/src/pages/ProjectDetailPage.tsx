@@ -48,6 +48,7 @@ import {
 import { format, isValid, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useAuthStore } from '../store/authStore';
+import { toDecimal, round2, toNumber } from '../utils/financeEngine';
 import { v4 as uuidv4 } from 'uuid';
 import {
   BordereauTable,
@@ -1411,18 +1412,18 @@ const ProjectDetailPage: FC = () => {
               // Calculate Total Général HT for each decompt (from TTC / 1.2)
               let previousTotalHT = 0;
               
-              // Helper: round to 2 decimals (like the décompte does)
-              const round2 = (n: number) => Math.round(n * 100) / 100;
+              // Helper: round to 2 decimals via Decimal.js (avoids IEEE 754 errors)
+              const safeRound2 = (n: number) => toNumber(round2(toDecimal(n)));
               
               return sortedDecompts.map((d: any) => {
                 const periode = periodesMap.get(d.periodeId);
                 
                 // Total Général HT = Total Général TTC / 1.2, rounded to 2 decimals
                 const totalGeneralTTC = d.totalGeneralTtc || d.total_general_ttc || d.totalTtc || d.total_ttc || 0;
-                const totalGeneralHT = round2(totalGeneralTTC / 1.2);
+                const totalGeneralHT = safeRound2(totalGeneralTTC / 1.2);
                 
                 // Montant à réviser = Total Général HT actuel - Total Général HT précédent
-                const montantAReviser = round2(totalGeneralHT - previousTotalHT);
+                const montantAReviser = safeRound2(totalGeneralHT - previousTotalHT);
                 
                 // Update previous for next iteration
                 previousTotalHT = totalGeneralHT;

@@ -75,6 +75,60 @@ export const authenticate = async (
   }
 };
 
+/**
+ * Middleware for static file serving (uploads).
+ * Supports authentication via:
+ * 1. Authorization header (Bearer token) — API clients
+ * 2. Cookie 'auth_token' — browser <img>, <video>, etc.
+ * This is necessary because <img src="..."> cannot send Authorization headers.
+ */
+export const authenticateStaticFiles = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    let token: string | undefined;
+
+    // 1. Check Authorization header first
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+      token = authHeader.slice(7).trim();
+    }
+
+    // 2. Fallback to cookie
+    if (!token && req.cookies?.auth_token) {
+      token = req.cookies.auth_token;
+    }
+
+    if (!token) {
+      throw new ApiError('Authentication required to access this resource', 401);
+    }
+
+    const decoded = jwt.verify(token, EFFECTIVE_JWT_SECRET, JWT_VERIFY_OPTIONS) as jwt.JwtPayload;
+
+    if (!decoded.id || !decoded.email || !decoded.role) {
+      throw new ApiError('Invalid token payload', 401);
+    }
+
+    req.user = {
+      id: decoded.id,
+      email: decoded.email,
+      role: decoded.role,
+      firstName: decoded.firstName,
+      lastName: decoded.lastName,
+    };
+
+    next();
+  } catch (error: any) {
+    if (error instanceof ApiError) {
+      return next(error);
+    }
+    logger.warn('Static file auth failed', { message: error.message, ip: req.ip, path: req.path });
+    next(new ApiError('Invalid or expired token', 401));
+  }
+};
+
 export const authorize = (...roles: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {

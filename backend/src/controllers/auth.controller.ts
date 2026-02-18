@@ -167,6 +167,16 @@ export const login = async (
       [user.id]
     );
 
+    // Set auth cookie for static file access (images, documents)
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'strict' : 'lax',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours (matches JWT_EXPIRES_IN)
+      path: '/',
+    });
+
     res.json({
       success: true,
       data: {
@@ -267,6 +277,16 @@ export const refreshToken = async (
       id: user.id,
       email: user.email,
       role: user.role
+    });
+
+    // Refresh the auth cookie as well
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.cookie('auth_token', newToken, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'strict' : 'lax',
+      maxAge: 24 * 60 * 60 * 1000,
+      path: '/',
     });
 
     res.json({

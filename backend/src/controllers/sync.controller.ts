@@ -187,6 +187,59 @@ async function applyCreate(
       logger.warn(`No valid columns to insert for ${tableName}`);
       // Still create the record with just id and user_id
     }
+
+    // 🔒 INTEGRITY CHECK: For decompts, check if duplicate already exists
+    if (tableName === 'decompts' && data.project_id && data.periode_id) {
+      const dupCheck = await client.query(
+        `SELECT id FROM decompts 
+         WHERE project_id = $1 AND periode_id = $2 AND deleted_at IS NULL AND id != $3`,
+        [data.project_id, data.periode_id, cleanId]
+      );
+      if (dupCheck.rows.length > 0) {
+        // Duplicate exists — update the existing one instead of creating a new one
+        const existingId = dupCheck.rows[0].id;
+        logger.warn(`🔒 SYNC: Duplicate decompt detected for project=${data.project_id} periode=${data.periode_id}. Updating existing ${existingId} instead of creating ${cleanId}`);
+        
+        const setClauses = Object.keys(data)
+          .map((col, i) => `${col} = $${i + 2}`)
+          .join(', ');
+        const updateValues = [existingId, ...Object.values(data), opId];
+        
+        if (setClauses) {
+          await client.query(
+            `UPDATE decompts SET ${setClauses}, last_op_id = $${updateValues.length}, version = version + 1, updated_at = NOW() WHERE id = $1`,
+            updateValues
+          );
+        }
+        return { success: true };
+      }
+    }
+
+    // 🔒 INTEGRITY CHECK: Same for periodes
+    if (tableName === 'periodes' && data.project_id && data.numero) {
+      const dupCheck = await client.query(
+        `SELECT id FROM periodes 
+         WHERE project_id = $1 AND numero = $2 AND deleted_at IS NULL AND id != $3`,
+        [data.project_id, data.numero, cleanId]
+      );
+      if (dupCheck.rows.length > 0) {
+        const existingId = dupCheck.rows[0].id;
+        logger.warn(`🔒 SYNC: Duplicate periode detected for project=${data.project_id} numero=${data.numero}. Updating existing ${existingId} instead of creating ${cleanId}`);
+        
+        const setClauses = Object.keys(data)
+          .map((col, i) => `${col} = $${i + 2}`)
+          .join(', ');
+        const updateValues = [existingId, ...Object.values(data), opId];
+        
+        if (setClauses) {
+          await client.query(
+            `UPDATE periodes SET ${setClauses}, last_op_id = $${updateValues.length}, version = version + 1, updated_at = NOW() WHERE id = $1`,
+            updateValues
+          );
+        }
+        return { success: true };
+      }
+    }
     
     const columns = ['id', 'user_id', ...Object.keys(data), 'last_op_id', 'version'];
     const values = [cleanId, userId, ...Object.values(data), opId, 1];

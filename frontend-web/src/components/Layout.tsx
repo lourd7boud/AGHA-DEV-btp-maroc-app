@@ -13,6 +13,8 @@ import {
   Trash2,
   TrendingUp,
   Database,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useState } from 'react';
@@ -67,27 +69,41 @@ const Layout: FC<LayoutProps> = ({ children }) => {
     });
   }
 
+  const sidebarWidth = sidebarOpen ? 'w-64' : 'w-[72px]';
+
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar */}
+    <div className="h-screen bg-gray-100 flex overflow-hidden">
+      {/* Sidebar — Fixed, full height, dark professional theme */}
       <aside
-        className={`${
-          sidebarOpen ? 'w-64' : 'w-20'
-        } bg-white border-r border-gray-200 transition-all duration-300 relative flex flex-col`}
+        className={`${sidebarWidth} fixed inset-y-0 left-0 z-30 flex flex-col bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 transition-all duration-300 ease-in-out`}
       >
-        <div className="flex items-center justify-between p-4 border-b">
+        {/* Logo / Header */}
+        <div className={`flex items-center h-16 px-4 ${sidebarOpen ? 'justify-between' : 'justify-center'}`}>
           {sidebarOpen && (
-            <h1 className="text-xl font-bold text-primary-600">{t('app.title')}</h1>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 bg-gradient-to-br from-sky-400 to-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-sky-500/20">
+                <span className="text-white font-bold text-sm">B</span>
+              </div>
+              <div>
+                <h1 className="text-[15px] font-bold text-white leading-tight tracking-tight">BTP App</h1>
+                <p className="text-[10px] text-slate-400 leading-none">Gestion de Projets</p>
+              </div>
+            </div>
           )}
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 hover:bg-gray-100 rounded-lg"
+            className="p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            title={sidebarOpen ? 'Réduire' : 'Étendre'}
           >
-            <Menu className="w-5 h-5" />
+            {sidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <Menu className="w-5 h-5" />}
           </button>
         </div>
 
-        <nav className="p-4 space-y-2 flex-1 overflow-y-auto">
+        {/* Divider */}
+        <div className="mx-3 border-t border-white/10" />
+
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1 scrollbar-thin">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
@@ -95,64 +111,81 @@ const Layout: FC<LayoutProps> = ({ children }) => {
               <Link
                 key={item.path}
                 to={item.path}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                title={!sidebarOpen ? item.label : undefined}
+                className={`group relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                   isActive
-                    ? 'bg-primary-50 text-primary-600'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    ? 'bg-sky-500/15 text-sky-400 shadow-sm'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5'
                 }`}
               >
-                <Icon className="w-5 h-5 flex-shrink-0" />
-                {sidebarOpen && <span>{item.label}</span>}
+                {/* Active indicator bar */}
+                {isActive && (
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-sky-400 rounded-r-full" />
+                )}
+                <Icon className={`w-5 h-5 flex-shrink-0 ${isActive ? 'text-sky-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+                {sidebarOpen && (
+                  <span className="truncate">{item.label}</span>
+                )}
+                {/* Tooltip when collapsed */}
+                {!sidebarOpen && (
+                  <span className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 text-white text-xs rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50 border border-white/10">
+                    {item.label}
+                  </span>
+                )}
               </Link>
             );
           })}
         </nav>
 
-        <div className="p-4 border-t mt-auto">
+        {/* Divider */}
+        <div className="mx-3 border-t border-white/10" />
+
+        {/* Bottom section */}
+        <div className="p-3 space-y-3">
           {/* Language Selector */}
-          <div className="mb-4">
-            {sidebarOpen && (
-              <div className="flex gap-2">
+          {sidebarOpen ? (
+            <div className="flex gap-1.5 px-1">
+              {['fr', 'ar', 'en'].map((lng) => (
                 <button
-                  onClick={() => changeLanguage('fr')}
-                  className={`px-3 py-1 text-sm rounded ${
-                    i18n.language === 'fr' ? 'bg-primary-100 text-primary-600' : 'bg-gray-100'
+                  key={lng}
+                  onClick={() => changeLanguage(lng)}
+                  className={`flex-1 px-2 py-1 text-xs font-medium rounded-md transition-colors ${
+                    i18n.language === lng
+                      ? 'bg-sky-500/20 text-sky-400 ring-1 ring-sky-500/30'
+                      : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
                   }`}
                 >
-                  FR
+                  {lng.toUpperCase()}
                 </button>
-                <button
-                  onClick={() => changeLanguage('ar')}
-                  className={`px-3 py-1 text-sm rounded ${
-                    i18n.language === 'ar' ? 'bg-primary-100 text-primary-600' : 'bg-gray-100'
-                  }`}
-                >
-                  AR
-                </button>
-                <button
-                  onClick={() => changeLanguage('en')}
-                  className={`px-3 py-1 text-sm rounded ${
-                    i18n.language === 'en' ? 'bg-primary-100 text-primary-600' : 'bg-gray-100'
-                  }`}
-                >
-                  EN
-                </button>
-              </div>
-            )}
-            {!sidebarOpen && <Globe className="w-5 h-5 mx-auto text-gray-500" />}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex justify-center">
+              <button
+                onClick={() => {
+                  const langs = ['fr', 'ar', 'en'];
+                  const idx = langs.indexOf(i18n.language);
+                  changeLanguage(langs[(idx + 1) % langs.length]);
+                }}
+                title={`Langue: ${i18n.language.toUpperCase()}`}
+                className="p-2 rounded-md text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors"
+              >
+                <Globe className="w-5 h-5" />
+              </button>
+            </div>
+          )}
 
           {/* User Info */}
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-600 font-semibold flex-shrink-0">
+          <div className={`flex items-center gap-3 p-2 rounded-lg bg-white/5 ${!sidebarOpen ? 'justify-center' : ''}`}>
+            <div className="w-9 h-9 bg-gradient-to-br from-sky-400 to-indigo-500 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0 shadow-md">
               {user?.firstName?.[0]}{user?.lastName?.[0]}
             </div>
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">
+                <p className="text-sm font-medium text-slate-200 truncate">
                   {user?.firstName} {user?.lastName}
                 </p>
-                <p className="text-xs text-gray-500 truncate">{user?.email}</p>
+                <p className="text-[11px] text-slate-500 truncate">{user?.email}</p>
               </div>
             )}
           </div>
@@ -160,7 +193,8 @@ const Layout: FC<LayoutProps> = ({ children }) => {
           {/* Logout Button */}
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+            title={!sidebarOpen ? t('auth.logout') : undefined}
+            className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors text-red-400/80 hover:text-red-400 hover:bg-red-500/10 ${!sidebarOpen ? 'justify-center' : ''}`}
           >
             <LogOut className="w-5 h-5 flex-shrink-0" />
             {sidebarOpen && <span>{t('auth.logout')}</span>}
@@ -168,8 +202,8 @@ const Layout: FC<LayoutProps> = ({ children }) => {
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto flex flex-col">
+      {/* Main Content — offset by sidebar width */}
+      <main className={`flex-1 ${sidebarOpen ? 'ml-64' : 'ml-[72px]'} transition-all duration-300 overflow-auto flex flex-col`}>
         <OfflineBanner />
         <div className="p-8 flex-1">{children}</div>
       </main>

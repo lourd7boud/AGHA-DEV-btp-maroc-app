@@ -41,6 +41,7 @@ class ApiService {
     
     this.client = axios.create({
       baseURL,
+      withCredentials: true, // Send cookies with requests (needed for auth_token cookie)
       headers: {
         'Content-Type': 'application/json',
       },

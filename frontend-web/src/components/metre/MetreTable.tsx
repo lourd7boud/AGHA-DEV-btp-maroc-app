@@ -11,9 +11,12 @@ import {
   TrendingUp,
 } from 'lucide-react';
 
-// 🔒 تقريب الكميات لرقمين - ROUND_HALF_UP
+import { toDecimal, round2, toNumber } from '../../utils/financeEngine';
+
+// 🔒 تقريب الكميات لرقمين - ROUND_HALF_UP via Decimal.js
+// ⚠️ Math.round(x*100)/100 يُسبب أخطاء (مثل 2.675 → 2.67 بدل 2.68)
 const roundQuantity = (value: number): number => {
-  return Math.round(value * 100) / 100;
+  return toNumber(round2(toDecimal(value)));
 };
 import { v4 as uuidv4 } from 'uuid';
 import { logSyncOperation } from '../../services/syncService';

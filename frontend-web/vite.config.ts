@@ -5,6 +5,25 @@ import path from 'path';
 
 export default defineConfig({
   base: './',
+  // Remove all console.log/debug/info in production builds (keeps console.error/warn)
+  esbuild: {
+    drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : [],
+  },
+  build: {
+    // Optimize chunk splitting for better caching
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-ui': ['lucide-react', 'recharts'],
+          'vendor-pdf': ['jspdf', 'jspdf-autotable'],
+          'vendor-utils': ['axios', 'date-fns', 'zustand', 'zod'],
+        },
+      },
+    },
+    // Increase warning limit since we have vendor chunks
+    chunkSizeWarningLimit: 600,
+  },
   plugins: [
     react(),
     VitePWA({

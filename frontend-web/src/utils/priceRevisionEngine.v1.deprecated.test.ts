@@ -29,7 +29,7 @@ import {
   MonthIndexes,
   BaseIndexes,
   RevisionFormula
-} from './priceRevisionEngine';
+} from './priceRevisionEngine.v1.deprecated';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 📊 EXCEL REFERENCE DATA - من ملف Révision Marché 19 RC.xlsx
