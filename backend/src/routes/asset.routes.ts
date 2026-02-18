@@ -7,7 +7,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { authenticate } from '../middleware/auth';
+import { authenticate, authenticateStaticFiles } from '../middleware/auth';
 import {
   listAssets,
   uploadAsset,
@@ -64,7 +64,16 @@ const upload = multer({
   },
 });
 
-// All routes require authentication
+/**
+ * GET /api/assets/:assetId/thumbnail
+ * Serve a thumbnail for an image asset
+ * Query params: ?size=grid|preview (default: grid)
+ * Uses authenticateStaticFiles to support cookie-based auth for <img src="..."> tags
+ * Must be registered BEFORE router.use(authenticate) so cookies work
+ */
+router.get('/:assetId/thumbnail', authenticateStaticFiles, getAssetThumbnail);
+
+// All other routes require Bearer token authentication
 router.use(authenticate);
 
 /**
@@ -112,12 +121,5 @@ router.post('/project/:projectId/pv/upload', upload.array('files', 10), uploadPV
  * Soft delete an asset
  */
 router.delete('/:assetId', deleteAsset);
-
-/**
- * GET /api/assets/:assetId/thumbnail
- * Serve a thumbnail for an image asset
- * Query params: ?size=grid|preview (default: grid)
- */
-router.get('/:assetId/thumbnail', getAssetThumbnail);
 
 export default router;

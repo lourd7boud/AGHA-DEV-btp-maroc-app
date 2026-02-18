@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Rule enforced**: "Sum first, round once, always ROUND_HALF_UP"
 
+### 🐞 Bug Fix — Photos & Documents Not Loading in Production
+
+**Problem**: Images and documents not displaying in production — `<img>` tags getting 401 errors on thumbnail endpoint.
+
+**Root Cause**: In the v1.5.0 Docker build, the thumbnail route (`GET /api/assets/:id/thumbnail`) was placed **after** `router.use(authenticate)` (Bearer-only). Since `<img>` tags can only send cookies (not Bearer headers), all thumbnail requests failed with 401.
+
+**Fix**: Backend route order corrected — thumbnail route now uses `authenticateStaticFiles` (supports both Bearer + Cookie) and is registered **before** `router.use(authenticate)`. Docker image rebuilt as v1.5.1.
+
 ---
 
 ## [1.5.0] - 2026-02-18
