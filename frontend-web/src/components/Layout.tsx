@@ -14,7 +14,6 @@ import {
   TrendingUp,
   Database,
   ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useState } from 'react';

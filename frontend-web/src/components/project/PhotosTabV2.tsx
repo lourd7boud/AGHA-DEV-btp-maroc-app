@@ -6,7 +6,7 @@
 
 import { FC, useState, useRef, useEffect } from 'react';
 import { 
-  Image, Upload, Trash2, Download, X, Loader2, ZoomIn, 
+  Image, Upload, Trash2, Download, Loader2, ZoomIn, 
   FolderPlus, Folder, FolderOpen, Check, Edit, ChevronLeft
 } from 'lucide-react';
 import { assetService, ProjectAsset } from '../../services/assetService';
@@ -15,6 +15,7 @@ import { Album } from '../../services/albumService';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import DropZone from '../common/DropZone';
+import PhotoLightbox from './PhotoLightbox';
 
 interface PhotosTabProps {
   projectId: string;
@@ -26,7 +27,7 @@ const PhotosTab: FC<PhotosTabProps> = ({ projectId, photos, onRefresh }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [selectedPhoto, setSelectedPhoto] = useState<ProjectAsset | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
   // Album states
@@ -501,7 +502,7 @@ const PhotosTab: FC<PhotosTabProps> = ({ projectId, photos, onRefresh }) => {
                     src={assetService.getThumbnailUrl(photo.id, 'grid')}
                     alt={photo.originalName}
                     className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                    onClick={!selectionMode ? () => setSelectedPhoto(photo) : undefined}
+                    onClick={!selectionMode ? () => setLightboxIndex(filteredPhotos.indexOf(photo)) : undefined}
                     loading="lazy"
                     onError={(e) => {
                       // Fallback to original if thumbnail fails
@@ -531,7 +532,7 @@ const PhotosTab: FC<PhotosTabProps> = ({ projectId, photos, onRefresh }) => {
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={(e) => { e.stopPropagation(); setSelectedPhoto(photo); }}
+                          onClick={(e) => { e.stopPropagation(); setLightboxIndex(filteredPhotos.indexOf(photo)); }}
                           className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors"
                           title="Agrandir"
                         >
@@ -574,30 +575,14 @@ const PhotosTab: FC<PhotosTabProps> = ({ projectId, photos, onRefresh }) => {
         </div>
       </div>
 
-      {/* Lightbox Modal */}
-      {selectedPhoto && (
-        <div 
-          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
-          onClick={() => setSelectedPhoto(null)}
-        >
-          <button
-            onClick={() => setSelectedPhoto(null)}
-            className="absolute top-4 right-4 p-2 text-white hover:bg-white/20 rounded-full transition-colors"
-          >
-            <X className="w-6 h-6" />
-          </button>
-          
-          <img
-            src={assetService.getAssetUrl(selectedPhoto.storagePath)}
-            alt={selectedPhoto.originalName}
-            className="max-w-full max-h-full object-contain"
-            onClick={(e) => e.stopPropagation()}
-          />
-
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/50 rounded-lg px-4 py-2 text-white text-sm">
-            {selectedPhoto.originalName} • {assetService.formatFileSize(selectedPhoto.fileSize)}
-          </div>
-        </div>
+      {/* PhotoLightbox */}
+      {lightboxIndex !== null && (
+        <PhotoLightbox
+          photos={filteredPhotos}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onDownload={handleDownload}
+        />
       )}
 
       {/* Album Create/Edit Modal */}
