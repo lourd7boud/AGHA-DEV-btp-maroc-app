@@ -9,9 +9,9 @@ import logger from '../utils/logger';
 
 // SECURITY: No hardcoded secrets — use env vars with dev-only fallback
 const JWT_SECRET: Secret = process.env.JWT_SECRET || 'dev-only-insecure-secret-do-not-use-in-production';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h'; // Reduced from 7d for security
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'; // 7 days for better UX
 const JWT_REFRESH_SECRET: Secret = process.env.JWT_REFRESH_SECRET || 'dev-only-refresh-secret-do-not-use';
-const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d'; // Reduced from 30d
+const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d'; // 30 days refresh
 
 // SECURITY: Bcrypt cost factor — 12 is the minimum recommended (was 10)
 const BCRYPT_ROUNDS = 12;
