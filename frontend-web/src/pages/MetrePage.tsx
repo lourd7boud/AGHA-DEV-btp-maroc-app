@@ -110,6 +110,23 @@ const SUBSECTION_COLORS = [
   { bg: 'bg-indigo-50', border: 'border-indigo-300', text: 'text-indigo-700' },
 ];
 
+// ============== PERIOD COLORS (for visual distinction) ==============
+const PERIODE_COLORS = [
+  { bg: 'bg-slate-50', border: 'border-l-slate-400', text: 'text-slate-600', badge: 'bg-slate-200 text-slate-700', dot: 'bg-slate-400' },
+  { bg: 'bg-sky-50', border: 'border-l-sky-400', text: 'text-sky-700', badge: 'bg-sky-100 text-sky-700', dot: 'bg-sky-400' },
+  { bg: 'bg-violet-50', border: 'border-l-violet-400', text: 'text-violet-700', badge: 'bg-violet-100 text-violet-700', dot: 'bg-violet-400' },
+  { bg: 'bg-emerald-50', border: 'border-l-emerald-400', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-400' },
+  { bg: 'bg-amber-50', border: 'border-l-amber-400', text: 'text-amber-700', badge: 'bg-amber-100 text-amber-700', dot: 'bg-amber-400' },
+  { bg: 'bg-rose-50', border: 'border-l-rose-400', text: 'text-rose-700', badge: 'bg-rose-100 text-rose-700', dot: 'bg-rose-400' },
+];
+// Current period always uses this distinct style
+const CURRENT_PERIODE_COLOR = { bg: 'bg-white', border: 'border-l-orange-400', text: 'text-orange-700', badge: 'bg-orange-100 text-orange-700 ring-1 ring-orange-300', dot: 'bg-orange-400' };
+
+const getPeriodeColor = (periodeNumero: number, currentPeriodeNumero: number) => {
+  if (periodeNumero === currentPeriodeNumero) return CURRENT_PERIODE_COLOR;
+  return PERIODE_COLORS[(periodeNumero - 1) % PERIODE_COLORS.length];
+};
+
 // ============== MAIN COMPONENT ==============
 
 const MetrePage: FC = () => {
@@ -1542,6 +1559,7 @@ const MetrePage: FC = () => {
         <table className={`w-full border ${colorClass || 'border-gray-300'}`}>
           <thead className="bg-gray-100">
             <tr>
+              <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 border-r border-gray-300 w-14" title="Période">Pér.</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-r border-gray-300 w-12">N°</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-r border-gray-300">Désignation</th>
               {['M³', 'M²', 'ML', 'M'].includes(item.unite) && (
@@ -1570,131 +1588,181 @@ const MetrePage: FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {contextLignes.map((ligne, idx) => (
-              <tr key={ligne.id} className="hover:bg-gray-50">
+            {contextLignes.map((ligne, idx) => {
+              const lignePeriodeNum = (ligne as any).periodeNumero || currentPeriodeNumero;
+              const isFromPrev = ligne.isFromPreviousPeriode === true;
+              const periodeColor = getPeriodeColor(lignePeriodeNum, currentPeriodeNumero);
+              return (
+              <tr key={ligne.id} className={`${isFromPrev ? periodeColor.bg + ' opacity-80' : 'hover:bg-gray-50'} border-l-4 ${periodeColor.border}`}>
+                <td className="px-1 py-2 text-center border-r border-gray-200">
+                  <span className={`inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full ${periodeColor.badge}`}>
+                    {isFromPrev ? `P${lignePeriodeNum}` : 'Act'}
+                  </span>
+                </td>
                 <td className="px-3 py-2 text-gray-700 font-medium border-r border-gray-200">{idx + 1}</td>
                 <td className="px-3 py-2 border-r border-gray-200">
-                  <input
-                    type="text"
-                    value={ligne.designation}
-                    onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'designation', e.target.value)}
-                    className="input text-sm w-full"
-                    placeholder="Mesure / Description..."
-                  />
+                  {isFromPrev ? (
+                    <span className="text-sm text-gray-600">{ligne.designation || <span className="italic text-gray-400">—</span>}</span>
+                  ) : (
+                    <input
+                      type="text"
+                      value={ligne.designation}
+                      onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'designation', e.target.value)}
+                      className="input text-sm w-full"
+                      placeholder="Mesure / Description..."
+                    />
+                  )}
                 </td>
                 {['M³', 'M²', 'ML', 'M'].includes(item.unite) && (
                   <td className="px-3 py-2 border-r border-gray-200">
-                    <input
-                      type="number"
-                      value={ligne.nombreSemblables || ''}
-                      onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'nombreSemblables', parseInt(e.target.value) || 1)}
-                      className="input text-sm text-center w-full"
-                      step="1"
-                      min="1"
-                      placeholder="1"
-                    />
+                    {isFromPrev ? (
+                      <span className="text-sm text-gray-500 block text-center">{ligne.nombreSemblables || ''}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        value={ligne.nombreSemblables || ''}
+                        onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'nombreSemblables', parseInt(e.target.value) || 1)}
+                        className="input text-sm text-center w-full"
+                        step="1"
+                        min="1"
+                        placeholder="1"
+                      />
+                    )}
                   </td>
                 )}
                 {champs.includes('longueur') && (
                   <td className="px-3 py-2 border-r border-gray-200">
-                    <input
-                      type="number"
-                      value={ligne.longueur || ''}
-                      onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'longueur', parseFloat(e.target.value) || 0)}
-                      className="input text-sm text-center w-full"
-                      step="0.01"
-                      placeholder="0.00"
-                    />
+                    {isFromPrev ? (
+                      <span className="text-sm text-gray-500 block text-center">{ligne.longueur || ''}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        value={ligne.longueur || ''}
+                        onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'longueur', parseFloat(e.target.value) || 0)}
+                        className="input text-sm text-center w-full"
+                        step="0.01"
+                        placeholder="0.00"
+                      />
+                    )}
                   </td>
                 )}
                 {champs.includes('largeur') && (
                   <td className="px-3 py-2 border-r border-gray-200">
-                    <input
-                      type="number"
-                      value={ligne.largeur || ''}
-                      onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'largeur', parseFloat(e.target.value) || 0)}
-                      className="input text-sm text-center w-full"
-                      step="0.01"
-                      placeholder="0.00"
-                    />
+                    {isFromPrev ? (
+                      <span className="text-sm text-gray-500 block text-center">{ligne.largeur || ''}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        value={ligne.largeur || ''}
+                        onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'largeur', parseFloat(e.target.value) || 0)}
+                        className="input text-sm text-center w-full"
+                        step="0.01"
+                        placeholder="0.00"
+                      />
+                    )}
                   </td>
                 )}
                 {champs.includes('profondeur') && (
                   <td className="px-3 py-2 border-r border-gray-200">
-                    <input
-                      type="number"
-                      value={ligne.profondeur || ''}
-                      onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'profondeur', parseFloat(e.target.value) || 0)}
-                      className="input text-sm text-center w-full"
-                      step="0.01"
-                      placeholder="0.00"
-                    />
+                    {isFromPrev ? (
+                      <span className="text-sm text-gray-500 block text-center">{ligne.profondeur || ''}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        value={ligne.profondeur || ''}
+                        onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'profondeur', parseFloat(e.target.value) || 0)}
+                        className="input text-sm text-center w-full"
+                        step="0.01"
+                        placeholder="0.00"
+                      />
+                    )}
                   </td>
                 )}
                 {champs.includes('nombre') && (
                   <td className="px-3 py-2 border-r border-gray-200">
-                    <input
-                      type="number"
-                      value={ligne.nombre || ''}
-                      onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'nombre', parseInt(e.target.value) || 0)}
-                      className="input text-sm text-center w-full"
-                      step="1"
-                      placeholder="0"
-                    />
+                    {isFromPrev ? (
+                      <span className="text-sm text-gray-500 block text-center">{ligne.nombre || ''}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        value={ligne.nombre || ''}
+                        onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'nombre', parseInt(e.target.value) || 0)}
+                        className="input text-sm text-center w-full"
+                        step="1"
+                        placeholder="0"
+                      />
+                    )}
                   </td>
                 )}
                 {champs.includes('diametre') && (
                   <td className="px-3 py-2 border-r border-gray-200">
-                    <input
-                      type="number"
-                      value={ligne.diametre || ''}
-                      onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'diametre', parseFloat(e.target.value) || 0)}
-                      className="input text-sm text-center w-full"
-                      step="0.1"
-                      placeholder="0"
-                    />
+                    {isFromPrev ? (
+                      <span className="text-sm text-gray-500 block text-center">{ligne.diametre || ''}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        value={ligne.diametre || ''}
+                        onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'diametre', parseFloat(e.target.value) || 0)}
+                        className="input text-sm text-center w-full"
+                        step="0.1"
+                        placeholder="0"
+                      />
+                    )}
                   </td>
                 )}
                 {['KG', 'T'].includes(item.unite) && (
                   <td className="px-3 py-2 border-r border-gray-200 bg-yellow-50">
-                    <input
-                      type="number"
-                      value={ligne.nombreElements || ''}
-                      onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'nombreElements', parseInt(e.target.value) || 1)}
-                      className="input text-sm text-center w-full bg-yellow-50"
-                      step="1"
-                      min="1"
-                      placeholder="1"
-                      title="Nombre d'éléments (poteaux, poutres...)"
-                    />
+                    {isFromPrev ? (
+                      <span className="text-sm text-gray-500 block text-center">{ligne.nombreElements || ''}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        value={ligne.nombreElements || ''}
+                        onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'nombreElements', parseInt(e.target.value) || 1)}
+                        className="input text-sm text-center w-full bg-yellow-50"
+                        step="1"
+                        min="1"
+                        placeholder="1"
+                        title="Nombre d'éléments (poteaux, poutres...)"
+                      />
+                    )}
                   </td>
                 )}
                 {/* 🆕 Partiel - قابل للتعديل المباشر */}
-                <td className="px-3 py-2 border-r border-gray-200 bg-blue-50">
-                  <input
-                    type="number"
-                    value={ligne.partiel || ''}
-                    onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'partiel', parseFloat(e.target.value) || 0)}
-                    className="input text-sm text-right w-full font-bold text-primary-600 bg-blue-50"
-                    step="0.01"
-                    placeholder="0.00"
-                    title="Saisie directe du partiel ou calculé automatiquement"
-                  />
+                <td className={`px-3 py-2 border-r border-gray-200 ${isFromPrev ? 'bg-gray-50' : 'bg-blue-50'}`}>
+                  {isFromPrev ? (
+                    <span className="text-sm text-right block font-bold text-gray-500">{ligne.partiel ? ligne.partiel.toFixed(3) : ''}</span>
+                  ) : (
+                    <input
+                      type="number"
+                      value={ligne.partiel || ''}
+                      onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'partiel', parseFloat(e.target.value) || 0)}
+                      className="input text-sm text-right w-full font-bold text-primary-600 bg-blue-50"
+                      step="0.01"
+                      placeholder="0.00"
+                      title="Saisie directe du partiel ou calculé automatiquement"
+                    />
+                  )}
                 </td>
                 <td className="px-3 py-2 text-center">
-                  <button
-                    onClick={() => handleDeleteLigne(item.bordereauLigneId, ligne.id)}
-                    className="p-1 text-red-500 hover:bg-red-100 rounded"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {isFromPrev ? (
+                    <span className="text-gray-300" title={`Période ${lignePeriodeNum} (verrouillé)`}>🔒</span>
+                  ) : (
+                    <button
+                      onClick={() => handleDeleteLigne(item.bordereauLigneId, ligne.id)}
+                      className="p-1 text-red-500 hover:bg-red-100 rounded"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
           <tfoot className="bg-gray-100">
             <tr>
-              <td colSpan={2 + champs.length + (['M³', 'M²', 'ML', 'M'].includes(item.unite) ? 1 : 0) + (['KG', 'T'].includes(item.unite) ? 1 : 0)} className="px-3 py-2 text-right font-semibold text-gray-700 border-r border-gray-300">
+              <td colSpan={3 + champs.length + (['M³', 'M²', 'ML', 'M'].includes(item.unite) ? 1 : 0) + (['KG', 'T'].includes(item.unite) ? 1 : 0)} className="px-3 py-2 text-right font-semibold text-gray-700 border-r border-gray-300">
                 Total:
               </td>
               <td className="px-3 py-2 text-right font-bold text-primary-700 bg-primary-50 border-r border-gray-300">
@@ -1922,6 +1990,32 @@ const MetrePage: FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Period Legend - Légende des périodes */}
+      {currentPeriodeNumero > 1 && (
+        <div className="card mb-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200">
+          <div className="flex items-center gap-2 flex-wrap text-sm">
+            <span className="font-semibold text-gray-700 mr-2">📊 Périodes :</span>
+            {allPeriodes
+              ?.filter(p => p.numero <= currentPeriodeNumero)
+              .sort((a, b) => a.numero - b.numero)
+              .map(p => {
+                const color = getPeriodeColor(p.numero, currentPeriodeNumero);
+                const isCurrent = p.numero === currentPeriodeNumero;
+                return (
+                  <div key={p.id} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full ${color.badge} ${isCurrent ? 'ring-2 ring-orange-300 font-bold' : ''}`}>
+                    <div className={`w-2.5 h-2.5 rounded-full ${color.dot}`} />
+                    <span>{isCurrent ? `P${p.numero} (actuelle)` : `P${p.numero}`}</span>
+                    {p.dateFin && <span className="text-[10px] opacity-70">({new Date(p.dateFin).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })})</span>}
+                  </div>
+                );
+              })
+            }
+            <span className="ml-2 text-gray-400">|</span>
+            <span className="text-gray-500 flex items-center gap-1">🔒 = verrouillé (période précédente)</span>
+          </div>
+        </div>
+      )}
 
       {/* Filter toolbar */}
       <div className="flex items-center gap-4 mb-4">

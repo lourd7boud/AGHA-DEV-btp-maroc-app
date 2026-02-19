@@ -27,6 +27,8 @@ const UsersManagementPage = lazy(() => import('./pages/UsersManagementPage'));
 const TrashPage = lazy(() => import('./pages/TrashPage'));
 const RevisionIndexesPage = lazy(() => import('./pages/RevisionIndexesPage'));
 const IndexManagementPage = lazy(() => import('./pages/revision/IndexManagementPage'));
+const ClientPortalPage = lazy(() => import('./pages/ClientPortalPage'));
+const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 
 // Components
 import Layout from './components/Layout';
@@ -168,6 +170,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/portal/:token" element={<ClientPortalPage />} />
         
         <Route
           path="/"
@@ -240,6 +243,19 @@ function App() {
             user ? (
               <Layout>
                 <DelaisPage />
+              </Layout>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        
+        <Route
+          path="/reports"
+          element={
+            user ? (
+              <Layout>
+                <ReportsPage />
               </Layout>
             ) : (
               <Navigate to="/login" replace />

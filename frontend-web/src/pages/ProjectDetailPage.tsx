@@ -18,7 +18,14 @@ import { assetService, ProjectAsset } from '../services/assetService';
 import { getProjectConfig, ProjectRevisionConfig } from '../services/revisionService';
 import { db } from '../db/database';
 import { logSyncOperation } from '../services/syncService';
-import { PhotosTab, PVTab, DocumentsTab, RevisionTab } from '../components/project';
+import { PhotosTab, PVTab, DocumentsTab, RevisionTab, AvenantsTab } from '../components/project';
+import WorkflowPanel from '../components/project/WorkflowPanel';
+import PenaltiesPanel from '../components/project/PenaltiesPanel';
+import ExportPanel from '../components/project/ExportPanel';
+import SiteDiaryPanel from '../components/project/SiteDiaryPanel';
+import ODSPanel from '../components/project/ODSPanel';
+import ShareLinksPanel from '../components/project/ShareLinksPanel';
+import GanttPanel from '../components/project/GanttPanel';
 import {
   ArrowLeft,
   Edit2,
@@ -44,6 +51,10 @@ import {
   ExternalLink,
   ChevronRight,
   AlertCircle,
+  Layers,
+  BookOpen,
+  FileSignature,
+  GanttChart,
 } from 'lucide-react';
 import { format, isValid, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -71,7 +82,7 @@ const safeFormatDate = (dateValue: string | undefined | null, formatStr: string,
   }
 };
 
-type TabType = 'overview' | 'bordereau' | 'periodes' | 'metre' | 'decompt' | 'revision' | 'photos' | 'pv' | 'documents';
+type TabType = 'overview' | 'bordereau' | 'periodes' | 'metre' | 'decompt' | 'revision' | 'avenants' | 'workflow' | 'penalties' | 'exports' | 'site-diary' | 'ods' | 'portal' | 'planning' | 'photos' | 'pv' | 'documents';
 type CreateMode = 'blank' | 'template' | 'copy' | 'import' | null;
 
 const ProjectDetailPage: FC = () => {
@@ -612,6 +623,14 @@ const ProjectDetailPage: FC = () => {
     }).length || 0 },
     { id: 'decompt', label: 'Décompte', icon: DollarSign, count: decompts?.length || 0 },
     { id: 'revision', label: 'Révision', icon: TrendingUp, count: null },
+    { id: 'avenants', label: 'Avenants', icon: Layers, count: null },
+    { id: 'workflow', label: 'Validations', icon: CheckCircle2, count: null },
+    { id: 'penalties', label: 'Pénalités', icon: AlertCircle, count: null },
+    { id: 'exports', label: 'Export Excel', icon: Download, count: null },
+    { id: 'site-diary', label: 'Journal', icon: BookOpen, count: null },
+    { id: 'ods', label: 'ODS', icon: FileSignature, count: null },
+    { id: 'portal', label: 'Portail Client', icon: Share2, count: null },
+    { id: 'planning', label: 'Planning', icon: GanttChart, count: null },
     { id: 'photos', label: 'Photos', icon: Image, count: projectPhotos.length },
     { id: 'pv', label: 'PV', icon: FileText, count: projectPVs.length },
     { id: 'documents', label: 'Documents', icon: Paperclip, count: projectDocuments.length },
@@ -1453,6 +1472,43 @@ const ProjectDetailPage: FC = () => {
             })) || []}
             revisionConfig={revisionConfig}
           />
+        )}
+
+        {activeTab === 'avenants' && (
+          <AvenantsTab
+            projectId={rawId!}
+            projectMontant={project.montant || 0}
+            projectDelais={project.delaisExecution}
+            bordereauLignes={bordereaux?.[0]?.lignes}
+          />
+        )}
+
+        {activeTab === 'workflow' && (
+          <WorkflowPanel projectId={rawId!} />
+        )}
+
+        {activeTab === 'penalties' && (
+          <PenaltiesPanel projectId={rawId!} montantMarche={project.montant || 0} />
+        )}
+
+        {activeTab === 'exports' && (
+          <ExportPanel projectId={rawId!} marcheNo={project.marcheNo} />
+        )}
+
+        {activeTab === 'site-diary' && (
+          <SiteDiaryPanel projectId={rawId!} />
+        )}
+
+        {activeTab === 'ods' && (
+          <ODSPanel projectId={rawId!} />
+        )}
+
+        {activeTab === 'portal' && (
+          <ShareLinksPanel projectId={rawId!} />
+        )}
+
+        {activeTab === 'planning' && (
+          <GanttPanel projectId={rawId!} />
         )}
 
         {activeTab === 'photos' && (

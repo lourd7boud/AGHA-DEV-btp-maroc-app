@@ -533,6 +533,386 @@ class ApiService {
     });
     return response.data;
   }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // AVENANTS (Contract Amendments / ملاحق العقود)
+  // ═══════════════════════════════════════════════════════════════════
+
+  async getAvenants(projectId: string) {
+    const response = await this.client.get(`/avenants/project/${projectId}`);
+    return response.data;
+  }
+
+  async getAvenantSummary(projectId: string) {
+    const response = await this.client.get(`/avenants/project/${projectId}/summary`);
+    return response.data;
+  }
+
+  async getAvenantById(id: string) {
+    const response = await this.client.get(`/avenants/${id}`);
+    return response.data;
+  }
+
+  async createAvenant(data: any) {
+    const response = await this.client.post('/avenants', data);
+    return response.data;
+  }
+
+  async updateAvenant(id: string, data: any) {
+    const response = await this.client.put(`/avenants/${id}`, data);
+    return response.data;
+  }
+
+  async deleteAvenant(id: string) {
+    const response = await this.client.delete(`/avenants/${id}`);
+    return response.data;
+  }
+
+  // WORKFLOW & APPROVALS (Circuit de Validation / نظام التأشيرات)
+  // ═══════════════════════════════════════════════════════════════════
+
+  async createApprovalRequest(data: any) {
+    const response = await this.client.post('/approvals', data);
+    return response.data;
+  }
+
+  async getApprovalsByProject(projectId: string, params?: { status?: string; documentType?: string }) {
+    const response = await this.client.get(`/approvals/project/${projectId}`, { params });
+    return response.data;
+  }
+
+  async getPendingApprovals() {
+    const response = await this.client.get('/approvals/pending');
+    return response.data;
+  }
+
+  async getApprovalById(id: string) {
+    const response = await this.client.get(`/approvals/${id}`);
+    return response.data;
+  }
+
+  async approveStep(id: string, data?: { comment?: string; conditions?: string }) {
+    const response = await this.client.post(`/approvals/${id}/approve`, data || {});
+    return response.data;
+  }
+
+  async rejectStep(id: string, data: { comment: string; returnToStep?: number }) {
+    const response = await this.client.post(`/approvals/${id}/reject`, data);
+    return response.data;
+  }
+
+  async cancelApproval(id: string, reason?: string) {
+    const response = await this.client.post(`/approvals/${id}/cancel`, { reason });
+    return response.data;
+  }
+
+  async getApprovalStats() {
+    const response = await this.client.get('/approvals/stats/summary');
+    return response.data;
+  }
+
+  async createWorkflow(data: any) {
+    const response = await this.client.post('/approvals/workflows', data);
+    return response.data;
+  }
+
+  async getWorkflowsByProject(projectId: string) {
+    const response = await this.client.get(`/approvals/workflows/project/${projectId}`);
+    return response.data;
+  }
+
+  async deleteWorkflow(id: string) {
+    const response = await this.client.delete(`/approvals/workflows/${id}`);
+    return response.data;
+  }
+
+  // PENALTIES & BONDS (الغرامات والضمانات)
+  // ═══════════════════════════════════════════════════════════════════
+
+  async createPenalty(data: any) {
+    const response = await this.client.post('/financial/penalties', data);
+    return response.data;
+  }
+
+  async getPenalties(projectId: string) {
+    const response = await this.client.get(`/financial/penalties/project/${projectId}`);
+    return response.data;
+  }
+
+  async updatePenalty(id: string, data: any) {
+    const response = await this.client.put(`/financial/penalties/${id}`, data);
+    return response.data;
+  }
+
+  async deletePenalty(id: string) {
+    const response = await this.client.delete(`/financial/penalties/${id}`);
+    return response.data;
+  }
+
+  async createBond(data: any) {
+    const response = await this.client.post('/financial/bonds', data);
+    return response.data;
+  }
+
+  async getBonds(projectId: string) {
+    const response = await this.client.get(`/financial/bonds/project/${projectId}`);
+    return response.data;
+  }
+
+  async updateBond(id: string, data: any) {
+    const response = await this.client.put(`/financial/bonds/${id}`, data);
+    return response.data;
+  }
+
+  async deleteBond(id: string) {
+    const response = await this.client.delete(`/financial/bonds/${id}`);
+    return response.data;
+  }
+
+  async createRetention(data: any) {
+    const response = await this.client.post('/financial/retentions', data);
+    return response.data;
+  }
+
+  async getRetentions(projectId: string) {
+    const response = await this.client.get(`/financial/retentions/project/${projectId}`);
+    return response.data;
+  }
+
+  async getFinancialSummary(projectId: string) {
+    const response = await this.client.get(`/financial/summary/project/${projectId}`);
+    return response.data;
+  }
+
+  // EXCEL EXPORTS (التصدير إلى إكسل)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  async getAvailableExports(projectId: string) {
+    const response = await this.client.get(`/export/available/${projectId}`);
+    return response.data;
+  }
+
+  async downloadExport(url: string, filename: string) {
+    const response = await this.client.get(url, { responseType: 'blob' });
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // SITE DIARY — Journal de Chantier
+  // ═══════════════════════════════════════════════════════════
+  async getDiaryEntries(projectId: string) {
+    const response = await this.client.get(`/site-diary/project/${projectId}`);
+    return response.data;
+  }
+
+  async getDiaryEntry(id: string) {
+    const response = await this.client.get(`/site-diary/${id}`);
+    return response.data;
+  }
+
+  async createDiaryEntry(data: any) {
+    const response = await this.client.post('/site-diary', data);
+    return response.data;
+  }
+
+  async updateDiaryEntry(id: string, data: any) {
+    const response = await this.client.put(`/site-diary/${id}`, data);
+    return response.data;
+  }
+
+  async deleteDiaryEntry(id: string) {
+    const response = await this.client.delete(`/site-diary/${id}`);
+    return response.data;
+  }
+
+  async validateDiaryEntry(id: string) {
+    const response = await this.client.post(`/site-diary/${id}/validate`);
+    return response.data;
+  }
+
+  async signDiaryEntry(id: string, data: any) {
+    const response = await this.client.post(`/site-diary/${id}/sign`, data);
+    return response.data;
+  }
+
+  async duplicateDiaryEntry(id: string, data: any) {
+    const response = await this.client.post(`/site-diary/${id}/duplicate`, data);
+    return response.data;
+  }
+
+  async getDiaryStats(projectId: string) {
+    const response = await this.client.get(`/site-diary/stats/${projectId}`);
+    return response.data;
+  }
+
+  // ODS — Ordres de Service
+
+  async getODSByProject(projectId: string) {
+    const response = await this.client.get(`/ods/project/${projectId}`);
+    return response.data;
+  }
+
+  async getODS(id: string) {
+    const response = await this.client.get(`/ods/${id}`);
+    return response.data;
+  }
+
+  async createODS(data: any) {
+    const response = await this.client.post('/ods', data);
+    return response.data;
+  }
+
+  async updateODS(id: string, data: any) {
+    const response = await this.client.put(`/ods/${id}`, data);
+    return response.data;
+  }
+
+  async deleteODS(id: string) {
+    const response = await this.client.delete(`/ods/${id}`);
+    return response.data;
+  }
+
+  async emitODS(id: string) {
+    const response = await this.client.post(`/ods/${id}/emit`);
+    return response.data;
+  }
+
+  async notifyODS(id: string, data: any) {
+    const response = await this.client.post(`/ods/${id}/notify`, data);
+    return response.data;
+  }
+
+  async acknowledgeODS(id: string, data: any) {
+    const response = await this.client.post(`/ods/${id}/acknowledge`, data);
+    return response.data;
+  }
+
+  async executeODS(id: string) {
+    const response = await this.client.post(`/ods/${id}/execute`);
+    return response.data;
+  }
+
+  async closeODS(id: string) {
+    const response = await this.client.post(`/ods/${id}/close`);
+    return response.data;
+  }
+
+  async cancelODS(id: string, data: any) {
+    const response = await this.client.post(`/ods/${id}/cancel`, data);
+    return response.data;
+  }
+
+  // ═══════════════════════════════════════════════
+  // Client Portal — Portail Client
+  // ═══════════════════════════════════════════════
+
+  async createShareLink(data: any) {
+    const response = await this.client.post('/portal/links', data);
+    return response.data;
+  }
+
+  async getShareLinks(projectId: string) {
+    const response = await this.client.get(`/portal/links/project/${projectId}`);
+    return response.data;
+  }
+
+  async toggleShareLink(id: string) {
+    const response = await this.client.patch(`/portal/links/${id}/toggle`);
+    return response.data;
+  }
+
+  async deleteShareLink(id: string) {
+    const response = await this.client.delete(`/portal/links/${id}`);
+    return response.data;
+  }
+
+  async getShareLinkAccessLog(id: string) {
+    const response = await this.client.get(`/portal/links/${id}/log`);
+    return response.data;
+  }
+
+  // Public (no auth)
+  async getPortalData(token: string, pin?: string) {
+    const params = pin ? `?pin=${pin}` : '';
+    const response = await this.client.get(`/portal/view/${token}${params}`);
+    return response.data;
+  }
+
+  // ═══════════════════════════════════════════════
+  // Cross-Project Reports — التقارير الشاملة
+  // ═══════════════════════════════════════════════
+
+  async getGlobalReport() {
+    const response = await this.client.get('/reports/global');
+    return response.data;
+  }
+
+  async getFinancialReport() {
+    const response = await this.client.get('/reports/financial');
+    return response.data;
+  }
+
+  async getDeadlinesReport() {
+    const response = await this.client.get('/reports/deadlines');
+    return response.data;
+  }
+
+  async getActivityReport() {
+    const response = await this.client.get('/reports/activity');
+    return response.data;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Gantt Planning
+  // ═══════════════════════════════════════════════════════════
+  async getGanttTasks(projectId: string) {
+    const response = await this.client.get(`/gantt/tasks/${projectId}`);
+    return response.data;
+  }
+
+  async createGanttTask(data: Record<string, unknown>) {
+    const response = await this.client.post('/gantt/tasks', data);
+    return response.data;
+  }
+
+  async updateGanttTask(id: string, data: Record<string, unknown>) {
+    const response = await this.client.put(`/gantt/tasks/${id}`, data);
+    return response.data;
+  }
+
+  async deleteGanttTask(id: string) {
+    const response = await this.client.delete(`/gantt/tasks/${id}`);
+    return response.data;
+  }
+
+  async batchUpdateGanttTasks(projectId: string, tasks: Record<string, unknown>[]) {
+    const response = await this.client.put(`/gantt/tasks/batch/${projectId}`, { tasks });
+    return response.data;
+  }
+
+  async createGanttDependency(data: Record<string, unknown>) {
+    const response = await this.client.post('/gantt/dependencies', data);
+    return response.data;
+  }
+
+  async deleteGanttDependency(id: string) {
+    const response = await this.client.delete(`/gantt/dependencies/${id}`);
+    return response.data;
+  }
+
+  async getGanttStats(projectId: string) {
+    const response = await this.client.get(`/gantt/stats/${projectId}`);
+    return response.data;
+  }
 }
 
 export const apiService = new ApiService();

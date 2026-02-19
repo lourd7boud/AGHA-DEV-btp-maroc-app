@@ -6,6 +6,7 @@ import { useProjects } from '../hooks/useUnifiedData';
 import { apiService } from '../services/apiService';
 import { isWeb } from '../utils/platform';
 import AlertsPanel, { Alert } from '../components/dashboard/AlertsPanel';
+import AnalyticsPanel from '../components/dashboard/AnalyticsPanel';
 import {
   FolderKanban,
   CheckCircle2,
@@ -621,6 +622,13 @@ const DashboardPage: FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Analytics Panel */}
+      <AnalyticsPanel 
+        projects={projects || []} 
+        decompts={decompts} 
+        bordereaux={bordereaux} 
+      />
 
       {/* Main Content Grid */}
       <div className="grid lg:grid-cols-3 gap-6">

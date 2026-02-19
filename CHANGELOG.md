@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.2] - 2026-02-19
+
+### 🐞 Bug Fix — Project Edit Not Saving Most Fields
+
+**Problem**: When editing a project and clicking Save, most fields (société, RC, CB, CNSS, patente, commune, typeMarché, programme, projet, ligne, chapitre, délais d'exécution, intervenants, dates de réception, etc.) were silently discarded — only the original 10 fields from v1.0 were saved.
+
+**Root Cause**: The Zod validation schema `createProjectSchema` in `backend/src/middleware/schemas.ts` was never updated when new fields were added to the system. It only defined 10 fields: `objet`, `marcheNo`, `annee`, `montant`, `maitreDOuvrage`, `delai`, `dateOrdreService`, `entreprise`, `tauxTVA`, `tauxRetenue`. Since `updateProjectSchema = createProjectSchema.partial()`, the update endpoint inherited the same limitation. Zod's default behavior **strips unknown fields** during `parse()`, so all 15+ additional fields sent by the frontend were silently removed before reaching the SQL UPDATE query. The controller then set those columns to `NULL`, erasing existing data.
+
+**Fix** (1 file):
+- **backend/src/middleware/schemas.ts**: Extended `createProjectSchema` to include all 25+ fields actually used by the system: `dateOuverture`, `typeMarche`, `commune`, `societe`, `rc`, `cb`, `cnss`, `patente`, `programme`, `projet`, `ligne`, `chapitre`, `delaisExecution`, `status`, `progress`, `assistanceTechnique`, `maitreOeuvre`, `osc`, `dateReceptionProvisoire`, `dateReceptionDefinitive`, `folderPath`. Legacy fields preserved for backward compatibility.
+
+**Impact**: All project edits now correctly persist every field. No data migration needed — previously saved data in PostgreSQL is intact; only the API validation layer was filtering it out.
+
 ## [1.5.1] - 2026-02-18
 
 ### 🐞 Bug Fix — Rounding Consistency (Attachment vs Métré vs Décompte)

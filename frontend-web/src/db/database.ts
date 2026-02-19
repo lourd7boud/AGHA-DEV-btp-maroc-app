@@ -299,12 +299,228 @@ export interface Attachment {
   deletedAt?: string;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// AVENANTS (Contract Amendments / ملاحق العقود)
+// ═══════════════════════════════════════════════════════════════════════
+
+export interface AvenantModification {
+  bordereauLigneId: string;
+  action: 'modifier_quantite' | 'modifier_prix' | 'supprimer';
+  ancienneQuantite?: number;
+  nouvelleQuantite?: number;
+  ancienPrix?: number;
+  nouveauPrix?: number;
+  designation: string;
+  unite: string;
+  montantDifference: number;
+}
+
+export interface AvenantPrixNouveau {
+  id: string;
+  numero: number;
+  designation: string;
+  unite: string;
+  quantite: number;
+  prixUnitaire: number;
+  montant: number;
+}
+
+export interface Avenant {
+  id: string;
+  projectId: string;
+  userId: string;
+  numero: number;
+  objet: string;
+  reference?: string;
+  dateAvenant?: string;
+  dateNotification?: string;
+  dateApprobation?: string;
+  montantInitial: number;
+  montantAvenant: number;
+  montantNouveau: number;
+  pourcentageVariation: number;
+  delaisSupplementaire: number;
+  nouveauDelais: number;
+  typeAvenant: 'modification' | 'prix_nouveaux' | 'mixte' | 'diminution';
+  motif?: string;
+  statut: 'brouillon' | 'en_attente' | 'approuve' | 'rejete' | 'annule';
+  modifications: AvenantModification[];
+  prixNouveaux: AvenantPrixNouveau[];
+  observations?: string;
+  montantCumule?: number; // calculated field from API
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+export interface AvenantSummary {
+  project: any;
+  montantInitial: number;
+  montantActuel: number;
+  totalMontantAvenants: number;
+  variationTotale: number;
+  delaisInitial: number;
+  delaisActuel: number;
+  totalDelaisSup: number;
+  nombreAvenants: number;
+  nombreApprouves: number;
+  avenants: Avenant[];
+}
+
+// WORKFLOW & APPROVALS (Circuit de Validation/Visa)
+
+export interface ApprovalStep {
+  id: string;
+  requestId: string;
+  stepOrder: number;
+  stepLabel: string;
+  role?: string;
+  status: 'en_attente' | 'en_cours' | 'approuve' | 'rejete' | 'renvoye';
+  decidedBy?: string;
+  decidedByName?: string;
+  decisionDate?: string;
+  comment?: string;
+  conditions?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApprovalHistory {
+  id: string;
+  requestId: string;
+  stepId?: string;
+  action: string;
+  actorId?: string;
+  actorName?: string;
+  comment?: string;
+  metadata?: any;
+  createdAt: string;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  userId: string;
+  projectId: string;
+  workflowId?: string;
+  documentType: 'decompt' | 'avenant' | 'pv' | 'ods' | 'attachement' | 'autre';
+  documentId: string;
+  documentReference?: string;
+  status: 'en_attente' | 'en_cours' | 'approuve' | 'rejete' | 'annule';
+  currentStep: number;
+  totalSteps: number;
+  priority: 'basse' | 'normal' | 'haute' | 'urgente';
+  dueDate?: string;
+  note?: string;
+  montant?: number;
+  submittedAt: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  projectName?: string;
+  marcheNo?: string;
+  steps?: ApprovalStep[];
+  history?: ApprovalHistory[];
+}
+
+export interface ApprovalStats {
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  cancelledCount: number;
+  totalCount: number;
+  urgentCount: number;
+  overdueCount: number;
+  pendingAmount: number;
+  approvedAmount: number;
+  avgHoursToComplete: number | null;
+}
+
+// PENALTIES & BONDS (غرامات وضمانات)
+
+export interface Penalty {
+  id: string;
+  projectId: string;
+  type: 'retard' | 'malfacon' | 'non_conformite' | 'securite' | 'environnement' | 'autre';
+  dateDebut?: string;
+  dateFin?: string;
+  nombreJours: number;
+  taux: number;
+  baseCalcul: number;
+  montantPenalite: number;
+  plafondPourcentage: number;
+  montantPlafond: number;
+  montantApplique: number;
+  statut: 'calculee' | 'notifiee' | 'contestee' | 'appliquee' | 'annulee' | 'remise';
+  referenceNotification?: string;
+  dateNotification?: string;
+  motif?: string;
+  observations?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Bond {
+  id: string;
+  projectId: string;
+  type: 'caution_provisoire' | 'caution_definitive' | 'retenue_garantie' | 'caution_avance' | 'caution_bonne_execution' | 'garantie_decennale';
+  montant: number;
+  pourcentage?: number;
+  baseCalcul: number;
+  organisme?: string;
+  referenceOrganisme?: string;
+  dateEmission?: string;
+  dateExpiration?: string;
+  dateMainlevee?: string;
+  statut: 'en_attente' | 'active' | 'expiree' | 'liberee' | 'saisie' | 'annulee';
+  observations?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Retention {
+  id: string;
+  projectId: string;
+  bondId?: string;
+  decomptId?: string;
+  decomptNumero?: number;
+  montantDecompt: number;
+  tauxRetenue: number;
+  montantRetenue: number;
+  montantCumule: number;
+  liberee: boolean;
+  dateLiberation?: string;
+  createdAt: string;
+}
+
+export interface FinancialSummary {
+  penalties: {
+    totalPenalties: number;
+    totalPenalites: number;
+    penalitesAppliquees: number;
+    joursRetard: number;
+  };
+  bonds: {
+    totalBonds: number;
+    montantCautionsActives: number;
+    cautionDefinitive: number;
+    retenueGarantieBond: number;
+    cautionsExpirees: number;
+  };
+  retentions: {
+    totalRetentions: number;
+    totalRetenue: number;
+    retenueLiberee: number;
+    retenueEnCours: number;
+  };
+}
+
 export interface SyncOperation {
   id: string;
   userId: string;
   deviceId: string;
   type: 'CREATE' | 'UPDATE' | 'DELETE';
-  entity: 'project' | 'bordereau' | 'periode' | 'metre' | 'decompt' | 'photo' | 'pv' | 'attachment' | 'company';
+  entity: 'project' | 'bordereau' | 'periode' | 'metre' | 'decompt' | 'photo' | 'pv' | 'attachment' | 'company' | 'avenant' | 'approval';
   entityId: string;
   data: any;
   timestamp: number;

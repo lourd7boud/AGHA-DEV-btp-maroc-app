@@ -54,12 +54,38 @@ export const createProjectSchema = z.object({
   marcheNo: z.string().min(1, 'Marché number is required').max(100),
   annee: z.union([z.string(), z.number()]).transform(v => String(v)),
   montant: z.number().nonnegative().optional().default(0),
+  dateOuverture: z.string().optional().nullable(),
+  typeMarche: z.enum(['normal', 'negocie']).optional().default('normal'),
+  commune: z.string().max(200).optional().nullable(),
+  // Informations entreprise
+  societe: z.string().max(500).optional().nullable(),
+  rc: z.string().max(100).optional().nullable(),
+  cb: z.string().max(100).optional().nullable(),
+  cnss: z.string().max(100).optional().nullable(),
+  patente: z.string().max(100).optional().nullable(),
+  // Informations projet
+  programme: z.string().max(200).optional().nullable(),
+  projet: z.string().max(200).optional().nullable(),
+  ligne: z.string().max(200).optional().nullable(),
+  chapitre: z.string().max(200).optional().nullable(),
+  delaisExecution: z.union([z.string(), z.number()]).optional().nullable(),
+  status: z.enum(['draft', 'active', 'completed', 'archived']).optional().default('active'),
+  progress: z.number().int().min(0).max(100).optional().nullable(),
+  // Intervenants
+  assistanceTechnique: z.string().max(500).optional().nullable(),
+  maitreOeuvre: z.string().max(500).optional().nullable(),
+  // Gestion des délais
+  osc: z.string().optional().nullable(),
+  dateReceptionProvisoire: z.string().optional().nullable(),
+  dateReceptionDefinitive: z.string().optional().nullable(),
+  // Ancien champs (rétrocompatibilité)
   maitreDOuvrage: z.string().max(500).optional().default(''),
   delai: z.number().int().nonnegative().optional().default(0),
   dateOrdreService: z.string().optional().default(''),
   entreprise: z.string().max(500).optional().default(''),
   tauxTVA: z.number().min(0).max(100).optional().default(20),
   tauxRetenue: z.number().min(0).max(100).optional().default(10),
+  folderPath: z.string().max(300).optional().nullable(),
 });
 
 export const updateProjectSchema = createProjectSchema.partial();
@@ -224,7 +250,139 @@ export const createMonthIndexesSchema = z.object({
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// 🔧 COMMON PARAM SCHEMAS
+// � AVENANT SCHEMAS (Contract Amendments)
+// ═══════════════════════════════════════════════════════════════════════
+
+const avenantModificationSchema = z.object({
+  bordereauLigneId: z.string().optional(),
+  action: z.enum(['modifier_quantite', 'modifier_prix', 'supprimer']).optional(),
+  ancienneQuantite: z.number().optional(),
+  nouvelleQuantite: z.number().optional(),
+  ancienPrix: z.number().optional(),
+  nouveauPrix: z.number().optional(),
+  designation: z.string().optional(),
+  unite: z.string().optional(),
+  montantDifference: z.number().optional(),
+}).passthrough();
+
+const prixNouveauSchema = z.object({
+  id: z.string().optional(),
+  numero: z.union([z.string(), z.number()]).optional(),
+  designation: z.string().optional().default(''),
+  unite: z.string().optional().default(''),
+  quantite: z.number().optional().default(0),
+  prixUnitaire: z.number().optional().default(0),
+  montant: z.number().optional().default(0),
+}).passthrough();
+
+export const createAvenantSchema = z.object({
+  projectId: z.string().min(1, 'Project ID is required'),
+  objet: z.string().min(1, "Objet de l'avenant est requis").max(1000),
+  reference: z.string().max(200).optional().nullable(),
+  dateAvenant: z.string().optional().nullable(),
+  dateNotification: z.string().optional().nullable(),
+  dateApprobation: z.string().optional().nullable(),
+  montantAvenant: z.number().optional().default(0),
+  delaisSupplementaire: z.union([z.string(), z.number()]).optional().default(0),
+  typeAvenant: z.enum(['modification', 'prix_nouveaux', 'mixte', 'diminution']).optional().default('modification'),
+  motif: z.string().max(2000).optional().nullable(),
+  modifications: z.array(avenantModificationSchema).optional().default([]),
+  prixNouveaux: z.array(prixNouveauSchema).optional().default([]),
+  observations: z.string().max(5000).optional().nullable(),
+});
+
+export const updateAvenantSchema = createAvenantSchema.partial().extend({
+  statut: z.enum(['brouillon', 'en_attente', 'approuve', 'rejete', 'annule']).optional(),
+});
+
+// ═══════════════════════════════════════════════════════════════════════// WORKFLOW & APPROVAL SCHEMAS
+// ═══════════════════════════════════════════════════════════════════════
+
+const approvalStepDefSchema = z.object({
+  stepOrder: z.number().int().min(1),
+  stepLabel: z.string().min(1).max(200),
+  role: z.string().max(100).optional().default('responsable'),
+});
+
+export const createApprovalRequestSchema = z.object({
+  projectId: z.string().min(1, 'Project ID is required'),
+  documentType: z.enum(['decompt', 'avenant', 'pv', 'ods', 'attachement', 'autre']),
+  documentId: z.string().min(1, 'Document ID is required'),
+  documentReference: z.string().max(300).optional().nullable(),
+  priority: z.enum(['basse', 'normal', 'haute', 'urgente']).optional().default('normal'),
+  dueDate: z.string().optional().nullable(),
+  note: z.string().max(2000).optional().nullable(),
+  montant: z.number().optional().nullable(),
+  steps: z.array(approvalStepDefSchema).optional().default([]),
+});
+
+export const approveStepSchema = z.object({
+  comment: z.string().max(2000).optional().nullable(),
+  conditions: z.string().max(2000).optional().nullable(),
+});
+
+export const rejectStepSchema = z.object({
+  comment: z.string().min(1, 'Un commentaire est requis pour le rejet').max(2000),
+  returnToStep: z.number().int().min(1).optional().nullable(),
+});
+
+export const createWorkflowSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(1000).optional().nullable(),
+  documentType: z.enum(['decompt', 'avenant', 'pv', 'ods', 'attachement', 'autre']),
+  projectId: z.string().optional().nullable(),
+  steps: z.array(approvalStepDefSchema).optional().default([]),
+  requireAllSteps: z.boolean().optional().default(true),
+  allowParallel: z.boolean().optional().default(false),
+});
+// ═══════════════════════════════════════════════════════════════════════
+// PENALTIES & BONDS SCHEMAS
+// ═══════════════════════════════════════════════════════════════════════
+
+export const createPenaltySchema = z.object({
+  projectId: z.string().min(1),
+  type: z.enum(['retard', 'malfacon', 'non_conformite', 'securite', 'environnement', 'autre']).optional().default('retard'),
+  dateDebut: z.string().optional().nullable(),
+  dateFin: z.string().optional().nullable(),
+  nombreJours: z.union([z.string(), z.number()]).optional().default(0),
+  taux: z.number().optional().default(0.001),
+  baseCalcul: z.number().optional().nullable(),
+  plafondPourcentage: z.number().optional().default(10),
+  statut: z.enum(['calculee', 'notifiee', 'contestee', 'appliquee', 'annulee', 'remise']).optional().default('calculee'),
+  motif: z.string().max(2000).optional().nullable(),
+  observations: z.string().max(5000).optional().nullable(),
+  referenceNotification: z.string().max(200).optional().nullable(),
+  dateNotification: z.string().optional().nullable(),
+});
+
+export const updatePenaltySchema = createPenaltySchema.partial();
+
+export const createBondSchema = z.object({
+  projectId: z.string().min(1),
+  type: z.enum(['caution_provisoire', 'caution_definitive', 'retenue_garantie', 'caution_avance', 'caution_bonne_execution', 'garantie_decennale']),
+  montant: z.number().optional().default(0),
+  pourcentage: z.number().optional().nullable(),
+  baseCalcul: z.number().optional().nullable(),
+  organisme: z.string().max(300).optional().nullable(),
+  referenceOrganisme: z.string().max(200).optional().nullable(),
+  dateEmission: z.string().optional().nullable(),
+  dateExpiration: z.string().optional().nullable(),
+  dateMainlevee: z.string().optional().nullable(),
+  statut: z.enum(['en_attente', 'active', 'expiree', 'liberee', 'saisie', 'annulee']).optional().default('active'),
+  observations: z.string().max(5000).optional().nullable(),
+});
+
+export const updateBondSchema = createBondSchema.partial();
+
+export const createRetentionSchema = z.object({
+  projectId: z.string().min(1),
+  bondId: z.string().optional().nullable(),
+  decomptId: z.string().optional().nullable(),
+  decomptNumero: z.number().optional().nullable(),
+  montantDecompt: z.number().optional().default(0),
+  tauxRetenue: z.number().optional().default(7),
+});
+// ═══════════════════════════════════════════════════════════════════════// �🔧 COMMON PARAM SCHEMAS
 // ═══════════════════════════════════════════════════════════════════════
 
 export const idParamSchema = z.object({

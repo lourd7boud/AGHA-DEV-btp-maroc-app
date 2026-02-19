@@ -14,6 +14,7 @@ import {
   TrendingUp,
   Database,
   ChevronLeft,
+  BarChart3,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useState } from 'react';
@@ -42,6 +43,7 @@ const Layout: FC<LayoutProps> = ({ children }) => {
   const menuItems = [
     { path: '/', icon: LayoutDashboard, label: t('dashboard.title') },
     { path: '/projects', icon: FolderKanban, label: t('project.projects') },
+    { path: '/reports', icon: BarChart3, label: 'Rapports' },
     { path: '/delais', icon: Clock, label: 'Gestion des Délais' },
     { path: '/trash', icon: Trash2, label: 'سلة المحذوفات' },
     { path: '/settings', icon: Settings, label: t('settings.title') },

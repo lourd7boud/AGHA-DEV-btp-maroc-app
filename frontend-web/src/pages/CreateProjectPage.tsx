@@ -333,32 +333,33 @@ const CreateProjectPage: FC = () => {
                 onChange={(e) => setFormData({ ...formData, commune: e.target.value })}
               >
                 <option value="">-- Sélectionner une commune --</option>
-                <optgroup label="Municipalités">
+                <optgroup label="Municipalités (communes urbaines)">
                   <option value="Akka">Akka</option>
+                  <option value="Fam El Hisn">Fam El Hisn</option>
                   <option value="Foum Zguid">Foum Zguid</option>
                   <option value="Tata">Tata</option>
-                  <option value="Tissint">Tissint</option>
                 </optgroup>
-                <optgroup label="Communes Rurales - Cercle Akka">
-                  <option value="Ait Rahal">Ait Rahal</option>
-                  <option value="Allougoum">Allougoum</option>
-                  <option value="Kasbat Sidi Abdellah Ben Mbarek">Kasbat Sidi Abdellah Ben Mbarek</option>
-                  <option value="Tighmart">Tighmart</option>
-                </optgroup>
-                <optgroup label="Communes Rurales - Cercle Foum Zguid">
-                  <option value="Icht">Icht</option>
-                  <option value="Tamanarte">Tamanarte</option>
-                </optgroup>
-                <optgroup label="Communes Rurales - Cercle Tata">
-                  <option value="Addis">Addis</option>
-                  <option value="Aguinane">Aguinane</option>
+                <optgroup label="Communes Rurales - Cercle d'Akka">
                   <option value="Ait Ouabelli">Ait Ouabelli</option>
-                  <option value="Kasbat El Harira">Kasbat El Harira</option>
-                  <option value="Ksar Oulad Abdelhalim">Ksar Oulad Abdelhalim</option>
+                  <option value="Kasbat Sidi Abdellah Ben Mbarek">Kasbat Sidi Abdellah Ben Mbarek</option>
+                  <option value="Tamanarte">Tamanarte</option>
+                  <option value="Tizounine">Tizounine</option>
+                </optgroup>
+                <optgroup label="Communes Rurales - Cercle de Foum Zguid">
+                  <option value="Aguinane">Aguinane</option>
+                  <option value="Akka Ighane">Akka Ighane</option>
+                  <option value="Allougoum">Allougoum</option>
+                  <option value="Ibn Yacoub">Ibn Yacoub</option>
+                  <option value="Tissint">Tissint</option>
+                  <option value="Tlite">Tlite</option>
+                </optgroup>
+                <optgroup label="Communes Rurales - Cercle de Tata">
+                  <option value="Adis">Adis</option>
+                  <option value="Issafen">Issafen</option>
                   <option value="Oum El Guerdane">Oum El Guerdane</option>
                   <option value="Tagmout">Tagmout</option>
-                  <option value="Tlite">Tlite</option>
-                  <option value="Tizounine">Tizounine</option>
+                  <option value="Tigzmerte">Tigzmerte</option>
+                  <option value="Tizaghte">Tizaghte</option>
                 </optgroup>
               </select>
             </div>

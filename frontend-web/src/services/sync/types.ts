@@ -25,7 +25,7 @@ export interface PendingOperation {
   id: string;
   timestamp: number;
   type: 'CREATE' | 'UPDATE' | 'DELETE';
-  entity: 'project' | 'bordereau' | 'periode' | 'metre' | 'decompt' | 'photo' | 'pv' | 'attachment' | 'company';
+  entity: 'project' | 'bordereau' | 'periode' | 'metre' | 'decompt' | 'photo' | 'pv' | 'attachment' | 'company' | 'avenant' | 'approval';
   entityId: string;
   payload: any;
   retryCount: number;

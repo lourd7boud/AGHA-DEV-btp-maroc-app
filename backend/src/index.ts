@@ -38,6 +38,15 @@ import indexManagementRoutes from './routes/indexManagement.routes';
 import albumRoutes from './routes/album.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import integrityRoutes from './routes/integrity.routes';
+import avenantRoutes from './routes/avenant.routes';
+import workflowRoutes from './routes/workflow.routes';
+import penaltyRoutes from './routes/penalty.routes';
+import exportRoutes from './routes/export.routes';
+import siteDiaryRoutes from './routes/siteDiary.routes';
+import odsRoutes from './routes/ods.routes';
+import portalRoutes from './routes/portal.routes';
+import reportsRoutes from './routes/reports.routes';
+import ganttRoutes from './routes/gantt.routes';
 
 logger.info('All routes imported successfully');
 
@@ -163,6 +172,15 @@ app.use('/api/index-management', indexManagementRoutes);
 app.use('/api/albums', albumRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/integrity', integrityRoutes);
+app.use('/api/avenants', avenantRoutes);
+app.use('/api/approvals', workflowRoutes);
+app.use('/api/financial', penaltyRoutes);
+app.use('/api/export', exportRoutes);
+app.use('/api/site-diary', siteDiaryRoutes);
+app.use('/api/ods', odsRoutes);
+app.use('/api/portal', portalRoutes);
+app.use('/api/reports', reportsRoutes);
+app.use('/api/gantt', ganttRoutes);
 
 // Error handling
 app.use(notFound);
