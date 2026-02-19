@@ -80,6 +80,13 @@ class ApiService {
         
         const originalRequest = error.config;
         
+        // CRITICAL: 429 (Too Many Requests) should NEVER logout the user
+        // Just reject and let the app show an error/retry
+        if (status === 429) {
+          console.warn('⚠️ Rate limited (429) - session preserved, will retry later');
+          return Promise.reject(error);
+        }
+        
         // CRITICAL: Server errors (500, 502, 503, 504) should NEVER invalidate the session
         // User should remain authenticated and retry later
         if (status && status >= 500) {
