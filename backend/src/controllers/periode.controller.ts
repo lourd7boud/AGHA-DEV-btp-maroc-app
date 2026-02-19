@@ -154,7 +154,8 @@ export const updatePeriode = async (
     if (!req.user) throw new ApiError('Not authenticated', 401);
 
     const { id } = req.params;
-    const { libelle, dateDebut, dateFin, statut, isDecompteDernier } = req.body;
+    const { libelle, dateDebut, dateFin, statut, isDecompteDernier,
+            tauxTVA, tauxRetenue, depensesExercicesAnterieurs, decomptesPrecedents } = req.body;
     const pool = getPool();
 
     // Check ownership
@@ -176,10 +177,15 @@ export const updatePeriode = async (
         date_fin = COALESCE($3, date_fin),
         statut = COALESCE($4, statut),
         is_decompte_dernier = COALESCE($5, is_decompte_dernier),
+        taux_tva = COALESCE($7, taux_tva),
+        taux_retenue = COALESCE($8, taux_retenue),
+        depenses_exercices_anterieurs = COALESCE($9, depenses_exercices_anterieurs),
+        decomptes_precedents = COALESCE($10, decomptes_precedents),
         updated_at = NOW()
       WHERE id = $6
       RETURNING *`,
-      [libelle, dateDebut, dateFin, statut, isDecompteDernier, id]
+      [libelle, dateDebut, dateFin, statut, isDecompteDernier, id,
+       tauxTVA, tauxRetenue, depensesExercicesAnterieurs, decomptesPrecedents]
     );
 
     res.json({

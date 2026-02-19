@@ -228,12 +228,14 @@ const PeriodeDecomptePage: FC = () => {
   });
 
   // Charger les paramètres financiers depuis la période
+  // 🔒 FIX: Ne PAS charger decomptesPrecedents ni depensesExercicesAnterieurs depuis la période
+  // car ils sont calculés automatiquement par le useEffect suivant à partir des décomptes réels
   useEffect(() => {
     if (periode) {
       setTauxTVA(periode.tauxTVA ?? 20);
       setTauxRetenue(periode.tauxRetenue ?? 10);
-      setDepensesExercicesAnterieurs(majoration(periode.depensesExercicesAnterieurs ?? 0));
-      setDecomptesPrecedents(majoration(periode.decomptesPrecedents ?? 0));
+      // ❌ REMOVED: setDepensesExercicesAnterieurs and setDecomptesPrecedents
+      // These are auto-calculated from actual previous décomptes data
     }
   }, [periode]);
 
@@ -681,6 +683,7 @@ const PeriodeDecomptePage: FC = () => {
 
       // تحديث فقط إذا تغير المبلغ
       if (existingDecompte.montantTotal !== newMontantTotal || existingDecompte.totalTTC !== totalTTC) {
+        // 1. Update local IndexedDB
         await db.decompts.update(existingDecompte.id, {
           lignes: lignes,
           montantTotal: newMontantTotal,
@@ -689,6 +692,21 @@ const PeriodeDecomptePage: FC = () => {
           updatedAt: now,
         });
         console.log('✅ Décompte mis à jour automatiquement:', newMontantTotal, 'TTC:', totalTTC);
+
+        // 2. 🔒 FIX: Also persist montantTotal to server so other décomptes can use it
+        if (isWeb()) {
+          try {
+            const rawDecomptId = existingDecompte.id.replace('decompt:', '');
+            await apiService.updateDecompt(rawDecomptId, {
+              montantTotal: newMontantTotal,
+              totalTTC: totalTTC,
+              totalGeneralTTC: totalTTC,
+            });
+            console.log('✅ [SERVER] montantTotal synced to server:', newMontantTotal);
+          } catch (err) {
+            console.warn('⚠️ Failed to sync montantTotal to server:', err);
+          }
+        }
       }
     };
 
