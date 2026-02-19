@@ -288,7 +288,9 @@ const PeriodeDecomptePage: FC = () => {
         const anneeDecompt = new Date(periodeDecompt.dateDebut).getFullYear();
         // Use montantTotal - this is "Montant de l'acompte à délivrer" (the net amount to pay)
         // NOT totalTTC which is "Total Général TTC"
-        const montantAPrendre = decompt.montantTotal || 0;
+        // 🔴 FIX: PostgreSQL numeric(15,2) is returned as STRING by pg driver
+        // Must convert to number to avoid string concatenation instead of addition
+        const montantAPrendre = Number(decompt.montantTotal) || 0;
 
         console.log('📅 Décompte:', {
           numero: decompt.numero,
@@ -682,7 +684,8 @@ const PeriodeDecomptePage: FC = () => {
       const newMontantTotal = recap.montantAcompte;
 
       // تحديث فقط إذا تغير المبلغ
-      if (existingDecompte.montantTotal !== newMontantTotal || existingDecompte.totalTTC !== totalTTC) {
+      // 🔴 FIX: Use Number() for comparison since DB returns numeric as string
+      if (Number(existingDecompte.montantTotal) !== newMontantTotal || Number(existingDecompte.totalTTC) !== totalTTC) {
         // 1. Update local IndexedDB
         await db.decompts.update(existingDecompte.id, {
           lignes: lignes,
