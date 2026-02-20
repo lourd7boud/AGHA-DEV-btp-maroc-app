@@ -51,6 +51,11 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,json,woff2}'],
+        // 🔒 Force immediate SW activation - prevents stale cache issues
+        skipWaiting: true,
+        clientsClaim: true,
+        // Clean old precached entries
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/api\./,

@@ -240,7 +240,7 @@ const PeriodeDecomptePage: FC = () => {
   }, [periode]);
 
   // Calculer automatiquement les dépenses et acomptes des périodes précédentes
-  // 🔴 FIX: Use serverDecompts for Web mode instead of IndexedDB
+  // 🔴 FIX v1.7.5: Robust calculation with proper date and type handling
   useEffect(() => {
     const calculatePreviousPayments = async () => {
       if (!periode || !projectId || !project) return;
@@ -251,7 +251,7 @@ const PeriodeDecomptePage: FC = () => {
       // Filter to get only previous décomptes (numero < current)
       const decomptesPrecedentsArray = allDecomptes.filter(d => d.numero < periode.numero);
 
-      console.log('📊 Calculating previous payments:', {
+      console.log('📊 [v1.7.5] Calculating previous payments:', {
         projectId,
         currentPeriodeNumero: periode.numero,
         allDecomptesCount: allDecomptes.length,
@@ -266,8 +266,19 @@ const PeriodeDecomptePage: FC = () => {
         return;
       }
 
-      // Récupérer l'année de la période actuelle
-      const anneePeriodeActuelle = new Date(periode.dateDebut).getFullYear();
+      // ════════════════════════════════════════════════════════════════════
+      // 🔒 YEAR DETERMINATION: Use dateFin (the actual décompte/arrêté date)
+      // NOT dateDebut (which is often the system entry date)
+      // dateFin matches the "D.P.n° X du DATE" shown in headers
+      // Fallback to dateDebut if dateFin is empty
+      // ════════════════════════════════════════════════════════════════════
+      const getYearFromPeriode = (p: any): number => {
+        const dateStr = p.dateFin || p.dateDebut;
+        if (!dateStr) return new Date().getFullYear();
+        return new Date(dateStr).getFullYear();
+      };
+
+      const anneePeriodeActuelle = getYearFromPeriode(periode);
 
       let totalExercicesAnterieurs = 0;
       let totalExerciceEnCours = 0;
@@ -285,18 +296,19 @@ const PeriodeDecomptePage: FC = () => {
           continue;
         }
 
-        const anneeDecompt = new Date(periodeDecompt.dateDebut).getFullYear();
-        // Use montantTotal - this is "Montant de l'acompte à délivrer" (the net amount to pay)
-        // NOT totalTTC which is "Total Général TTC"
-        // 🔴 FIX: PostgreSQL numeric(15,2) is returned as STRING by pg driver
-        // Must convert to number to avoid string concatenation instead of addition
+        // 🔒 Use dateFin for year (matches header "D.P.n° X du DATE")
+        const anneeDecompt = getYearFromPeriode(periodeDecompt);
+        // 🔒 Always convert to Number - PostgreSQL numeric returns strings
         const montantAPrendre = Number(decompt.montantTotal) || 0;
 
-        console.log('📅 Décompte:', {
+        console.log('📅 [v1.7.5] Décompte:', {
           numero: decompt.numero,
+          dateFin: periodeDecompt.dateFin,
+          dateDebut: periodeDecompt.dateDebut,
           anneeDecompt,
           anneePeriodeActuelle,
-          montant: montantAPrendre
+          montantRaw: decompt.montantTotal,
+          montantNumber: montantAPrendre
         });
 
         // Si le décompte est d'une année précédente → exercices antérieurs
@@ -309,9 +321,10 @@ const PeriodeDecomptePage: FC = () => {
         }
       }
 
-      console.log('💰 Calculated totals:', {
+      console.log('💰 [v1.7.5] Calculated totals:', {
         totalExercicesAnterieurs,
-        totalExerciceEnCours
+        totalExerciceEnCours,
+        anneePeriodeActuelle
       });
 
       setDepensesExercicesAnterieurs(majoration(totalExercicesAnterieurs));
