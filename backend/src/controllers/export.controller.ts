@@ -877,7 +877,7 @@ export const getAvailableExports = async (req: Request, res: Response): Promise<
         description: 'Détail estimatif complet avec formules',
         icon: 'table',
         available: hasBordereau,
-        url: `/api/export/bordereau/${projectId}`,
+        url: `/export/bordereau/${projectId}`,
       },
       {
         id: 'situation',
@@ -885,7 +885,7 @@ export const getAvailableExports = async (req: Request, res: Response): Promise<
         description: 'Récapitulatif des quantités par période',
         icon: 'bar-chart',
         available: hasBordereau && hasPeriodes,
-        url: `/api/export/situation/${projectId}`,
+        url: `/export/situation/${projectId}`,
       },
       {
         id: 'recapitulatif',
@@ -893,7 +893,7 @@ export const getAvailableExports = async (req: Request, res: Response): Promise<
         description: 'Fiche complète multi-feuilles (projet, décomptes, pénalités)',
         icon: 'file-text',
         available: true,
-        url: `/api/export/recapitulatif/${projectId}`,
+        url: `/export/recapitulatif/${projectId}`,
       },
       ...decompts.map((d: any) => ({
         id: `decompt-${d.id}`,
@@ -901,7 +901,7 @@ export const getAvailableExports = async (req: Request, res: Response): Promise<
         description: `${formatDateFR(d.dateDecompte)} — ${d.statut || 'draft'}`,
         icon: 'receipt',
         available: true,
-        url: `/api/export/decompt/${d.id}`,
+        url: `/export/decompt/${d.id}`,
       })),
     ];
 
