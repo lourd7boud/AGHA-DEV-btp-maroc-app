@@ -59,10 +59,10 @@ let isListening = false;
 export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
   logger.info('Initializing Socket.IO server...');
 
-  // PHASE 2: Consistent CORS with index.ts — no wildcard fallback
+  // PHASE 2: Consistent CORS with index.ts
   const allowedOrigins = process.env.CORS_ORIGIN
     ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
-    : ['http://localhost:5173', 'http://localhost:3000'];
+    : ['https://marocinfra.com', 'https://www.marocinfra.com', 'https://dev.marocinfra.com', 'http://localhost:5173', 'http://localhost:3000'];
 
   io = new SocketIOServer(httpServer, {
     cors: {
@@ -112,6 +112,14 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
     }
   });
 
+  // ─── Presence: Periodic cleanup of stale sessions ───
+  setInterval(async () => {
+    try {
+      const pool = getPool();
+      await pool.query(`SELECT cleanup_stale_sessions()`);
+    } catch (e) { /* ignore */ }
+  }, 60_000); // Every 60 seconds
+
   // Connection handler
   io.on('connection', (socket: AuthenticatedSocket) => {
     logger.info(`Socket connected: ${socket.id} (user: ${socket.userId})`);
@@ -120,6 +128,22 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
     if (socket.userId) {
       socket.join(`user:${socket.userId}`);
       logger.debug(`Socket ${socket.id} joined room: user:${socket.userId}`);
+
+      // ─── Presence: Create session on connect ───
+      (async () => {
+        try {
+          const pool = getPool();
+          const { v4: uuidv4 } = require('uuid');
+          const ua = socket.handshake.headers['user-agent'] || '';
+          await pool.query(
+            `INSERT INTO user_sessions (id, user_id, socket_id, device_info, is_active, connected_at, last_heartbeat)
+             VALUES ($1, $2, $3, $4, true, NOW(), NOW())`,
+            [uuidv4(), socket.userId, socket.id, JSON.stringify({ userAgent: ua, deviceId: socket.deviceId })]
+          );
+          // Broadcast presence update to all clients
+          if (io) io.emit('presence:update', { userId: socket.userId, status: 'online' });
+        } catch (err) { logger.error('Presence connect error:', err); }
+      })();
     }
 
     // Join project rooms
@@ -179,9 +203,40 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
       }
     });
 
+    // ─── Presence: Heartbeat + Activity tracking ───
+    socket.on('presence:heartbeat', async (data: { page?: string; projectId?: string; activity?: string }) => {
+      if (!socket.userId) return;
+      try {
+        const pool = getPool();
+        await pool.query(
+          `UPDATE user_sessions 
+           SET last_heartbeat = NOW(), 
+               current_page = COALESCE($1, current_page),
+               current_project_id = $2,
+               current_activity = COALESCE($3, current_activity)
+           WHERE socket_id = $4 AND is_active = true`,
+          [data.page || null, data.projectId || null, data.activity || null, socket.id]
+        );
+      } catch (err) { /* ignore heartbeat errors */ }
+    });
+
     // Handle disconnection
     socket.on('disconnect', (reason) => {
       logger.info(`Socket disconnected: ${socket.id} (reason: ${reason})`);
+      // ─── Presence: Mark session as disconnected ───
+      if (socket.userId) {
+        (async () => {
+          try {
+            const pool = getPool();
+            await pool.query(
+              `UPDATE user_sessions SET is_active = false, disconnected_at = NOW() WHERE socket_id = $1`,
+              [socket.id]
+            );
+            // Broadcast presence update
+            if (io) io.emit('presence:update', { userId: socket.userId, status: 'offline' });
+          } catch (err) { logger.error('Presence disconnect error:', err); }
+        })();
+      }
     });
 
     // Handle errors

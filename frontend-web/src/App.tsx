@@ -448,8 +448,10 @@ function App() {
         <Route
           path="/admin"
           element={
-            user?.role === 'super_admin' ? (
-              <AdminDashboardPage />
+            user?.role === 'super_admin' || user?.role === 'admin' ? (
+              <Layout>
+                <AdminDashboardPage />
+              </Layout>
             ) : (
               <Navigate to="/" replace />
             )
@@ -459,8 +461,10 @@ function App() {
         <Route
           path="/admin/users"
           element={
-            user?.role === 'super_admin' ? (
-              <UsersManagementPage />
+            user?.role === 'super_admin' || user?.role === 'admin' ? (
+              <Layout>
+                <UsersManagementPage />
+              </Layout>
             ) : (
               <Navigate to="/" replace />
             )

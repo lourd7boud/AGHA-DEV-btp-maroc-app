@@ -634,4 +634,9 @@ class RealtimeSyncService {
 
 export const realtimeSync = new RealtimeSyncService();
 
+// Expose socket for presence system
+export function getRealtimeSocket(): Socket | null {
+  return (realtimeSync as any).socket;
+}
+
 export default realtimeSync;

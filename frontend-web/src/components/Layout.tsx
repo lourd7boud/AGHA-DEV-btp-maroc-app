@@ -19,6 +19,7 @@ import {
 import { useAuthStore } from '../store/authStore';
 import { useState } from 'react';
 import { OfflineBanner } from './NetworkStatusIndicator';
+import PresenceBar from './PresenceBar';
 
 interface LayoutProps {
   children: ReactNode;
@@ -102,6 +103,13 @@ const Layout: FC<LayoutProps> = ({ children }) => {
 
         {/* Divider */}
         <div className="mx-3 border-t border-white/10" />
+
+        {/* Online Users Presence */}
+        {sidebarOpen && (
+          <div className="px-3 py-2">
+            <PresenceBar />
+          </div>
+        )}
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1 scrollbar-thin">

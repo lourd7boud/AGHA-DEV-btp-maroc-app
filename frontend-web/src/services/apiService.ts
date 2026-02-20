@@ -920,6 +920,70 @@ class ApiService {
     const response = await this.client.get(`/gantt/stats/${projectId}`);
     return response.data;
   }
+
+  // ═══════════════════════════════════════════════════════════
+  // ADMIN — User Management & Presence
+  // ═══════════════════════════════════════════════════════════
+
+  async getAdminStats() {
+    const response = await this.client.get('/admin/stats');
+    return response.data;
+  }
+
+  async getAdminUsers() {
+    const response = await this.client.get('/admin/users');
+    return response.data;
+  }
+
+  async createAdminUser(data: {
+    email: string;
+    password: string;
+    firstName: string;
+    lastName: string;
+    role?: string;
+    trialEndDate?: string;
+    jobTitle?: string;
+    phone?: string;
+    department?: string;
+  }) {
+    const response = await this.client.post('/admin/users', data);
+    return response.data;
+  }
+
+  async updateAdminUser(id: string, data: Record<string, any>) {
+    const response = await this.client.put(`/admin/users/${id}`, data);
+    return response.data;
+  }
+
+  async deleteAdminUser(id: string) {
+    const response = await this.client.delete(`/admin/users/${id}`);
+    return response.data;
+  }
+
+  async getProjectMembers(projectId: string) {
+    const response = await this.client.get(`/admin/projects/${projectId}/members`);
+    return response.data;
+  }
+
+  async setProjectMember(projectId: string, data: { userId: string; role: string; permissions?: Record<string, boolean> }) {
+    const response = await this.client.post(`/admin/projects/${projectId}/members`, data);
+    return response.data;
+  }
+
+  async removeProjectMember(projectId: string, userId: string) {
+    const response = await this.client.delete(`/admin/projects/${projectId}/members/${userId}`);
+    return response.data;
+  }
+
+  async getAuditLogs(params?: { limit?: number; offset?: number; action?: string }) {
+    const response = await this.client.get('/admin/audit-logs', { params });
+    return response.data;
+  }
+
+  async getOnlineUsers() {
+    const response = await this.client.get('/admin/online');
+    return response.data;
+  }
 }
 
 export const apiService = new ApiService();
