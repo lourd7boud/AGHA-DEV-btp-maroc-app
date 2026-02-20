@@ -17,10 +17,10 @@ const router = Router();
 
 /**
  * @route   POST /api/auth/register
- * @desc    Register new user
- * @access  Public
+ * @desc    Register new user - DISABLED (admin-only user creation via /api/admin/users)
+ * @access  Disabled
  */
-router.post('/register', validate({ body: registerSchema }), register);
+// router.post('/register', validate({ body: registerSchema }), register);
 
 /**
  * @route   POST /api/auth/login

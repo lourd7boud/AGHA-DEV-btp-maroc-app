@@ -163,7 +163,7 @@ app.get('/health', (req: Request, res: Response) => {
 // API Routes
 app.use('/api/health', healthRoutes);
 app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
+// Register endpoint disabled - user creation is admin-only via /api/admin/users
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/bordereau', bordereauRoutes);

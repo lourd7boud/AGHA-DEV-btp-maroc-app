@@ -222,9 +222,6 @@ const LoginPage: FC = () => {
         {/* Footer Links */}
         <div className="login-footer">
           <div className="login-footer-links">
-            <Link to="/register" className="login-footer-link">
-              Vous n'avez pas de compte ? Inscrivez-vous
-            </Link>
             <Link to="/forgot-password" className="login-footer-link">
               Mot de passe oublié ?
             </Link>
