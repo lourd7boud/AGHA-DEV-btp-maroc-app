@@ -5,6 +5,7 @@ import { useProject, useBordereaux, usePeriodes, useMetres, useDecompts } from '
 import { isWeb } from '../utils/platform';
 import { apiService } from '../services/apiService';
 import { useAuthStore } from '../store/authStore';
+import DateInput from '../components/ui/DateInput';
 import {
   ArrowLeft,
   Save,
@@ -1812,11 +1813,10 @@ const MetrePage: FC = () => {
             <div className="flex items-center gap-4 mt-3">
               <div className="flex items-center gap-2">
                 <label className="text-sm text-gray-600">Date des travaux:</label>
-                <input
-                  type="date"
+                <DateInput
                   value={metreDate}
-                  onChange={(e) => {
-                    setMetreDate(e.target.value);
+                  onChange={(val) => {
+                    setMetreDate(val);
                     markAsChanged();
                   }}
                   className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"

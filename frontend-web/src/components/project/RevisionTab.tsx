@@ -858,7 +858,7 @@ const RevisionTab: React.FC<Props> = ({
                           {revision.decomptNumero}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">
-                          {format(new Date(revision.dateDebut), 'dd/MM/yy')} - {format(new Date(revision.dateFin), 'dd/MM/yy')}
+                          {format(new Date(revision.dateDebut), 'dd/MM/yyyy')} - {format(new Date(revision.dateFin), 'dd/MM/yyyy')}
                         </td>
                         <td className="px-4 py-3 text-right text-sm text-gray-600">
                           {revision.totalJours}

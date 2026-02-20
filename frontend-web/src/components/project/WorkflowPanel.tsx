@@ -12,6 +12,7 @@
  */
 
 import { FC, useState, useEffect, useCallback } from 'react';
+import DateInput from '../ui/DateInput';
 import { apiService } from '../../services/apiService';
 import { ApprovalRequest, ApprovalStats } from '../../db/database';
 import {
@@ -408,10 +409,9 @@ const CreateRequestForm: FC<{
         {/* Due Date */}
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">Date limite</label>
-          <input
-            type="date"
+          <DateInput
             value={form.dueDate}
-            onChange={e => setForm({ ...form, dueDate: e.target.value })}
+            onChange={value => setForm({ ...form, dueDate: value })}
             className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400"
           />
         </div>

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import DateInput from '../ui/DateInput';
 
 interface AvenantsTabProps {
   projectId: string;
@@ -380,28 +381,25 @@ const AvenantsTab: FC<AvenantsTabProps> = ({ projectId, projectMontant }) => {
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Date avenant</label>
-              <input
-                type="date"
+              <DateInput
                 value={formData.dateAvenant}
-                onChange={e => setFormData(p => ({ ...p, dateAvenant: e.target.value }))}
+                onChange={val => setFormData(p => ({ ...p, dateAvenant: val }))}
                 className="w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Date notification</label>
-              <input
-                type="date"
+              <DateInput
                 value={formData.dateNotification}
-                onChange={e => setFormData(p => ({ ...p, dateNotification: e.target.value }))}
+                onChange={val => setFormData(p => ({ ...p, dateNotification: val }))}
                 className="w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Date approbation</label>
-              <input
-                type="date"
+              <DateInput
                 value={formData.dateApprobation}
-                onChange={e => setFormData(p => ({ ...p, dateApprobation: e.target.value }))}
+                onChange={val => setFormData(p => ({ ...p, dateApprobation: val }))}
                 className="w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
               />
             </div>

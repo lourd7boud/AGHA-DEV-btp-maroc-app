@@ -1,6 +1,7 @@
 import { FC, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import DateInput from '../components/ui/DateInput';
 import { ArrowLeft, Save } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { db, Company } from '../db/database';
@@ -568,11 +569,10 @@ const CreateProjectPage: FC = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Date d'ouverture
               </label>
-              <input
-                type="date"
+              <DateInput
                 className="input"
                 value={formData.dateOuverture}
-                onChange={(e) => setFormData({ ...formData, dateOuverture: e.target.value })}
+                onChange={(val) => setFormData({ ...formData, dateOuverture: val })}
               />
               <p className="text-xs text-gray-500 mt-1">Date d'ouverture des plis</p>
             </div>
@@ -596,11 +596,10 @@ const CreateProjectPage: FC = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 O.S.C (Date début des travaux)
               </label>
-              <input
-                type="date"
+              <DateInput
                 className="input"
                 value={formData.osc}
-                onChange={(e) => setFormData({ ...formData, osc: e.target.value })}
+                onChange={(val) => setFormData({ ...formData, osc: val })}
               />
               <p className="text-xs text-gray-500 mt-1">Ordre de Service de Commencement</p>
             </div>

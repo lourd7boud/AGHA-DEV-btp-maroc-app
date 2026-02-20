@@ -291,8 +291,8 @@ export async function generateRevisionPDF(
     ['Objet du marché', project.objet || ''],
     ['Société', project.societe || ''],
     ['Mode de passation du marché', `Appel d'offre ouvert sur offre de prix N°${project.marcheNo}`],
-    ['Date d\'ouverture des plis', project.dateOuverture ? format(new Date(project.dateOuverture), 'dd-MM-yyyy') : ''],
-    ['Date de l\'ordre de service de commencement des travaux', oscDate ? format(oscDate, 'dd-MM-yyyy') : ''],
+    ['Date d\'ouverture des plis', project.dateOuverture ? format(new Date(project.dateOuverture), 'dd/MM/yyyy') : ''],
+    ['Date de l\'ordre de service de commencement des travaux', oscDate ? format(oscDate, 'dd/MM/yyyy') : ''],
     ['Délai d\'exécution', project.delaisExecution ? `${project.delaisExecution} mois` : ''],
     ['Formules de la révision', buildFormulaString(formula)]
   ];
@@ -480,7 +480,7 @@ export async function generateRevisionPDF(
   const revBody: any[][] = [];
 
   // Epoch info rows
-  const baseDateStr = format(baseDate, 'dd-MM-yyyy');
+  const baseDateStr = format(baseDate, 'dd/MM/yyyy');
   revBody.push([
     { content: '', styles: { fillColor: [255, 255, 255] } },
     { content: baseDateStr, styles: { fillColor: [255, 230, 204] } },
@@ -490,8 +490,8 @@ export async function generateRevisionPDF(
   if (oscDate) {
     revBody.push([
       { content: '', styles: { fillColor: [255, 255, 255] } },
-      { content: format(oscDate, 'dd-MM-yyyy'), styles: { fillColor: [255, 230, 204] } },
-      { content: `Ordre de service de commencement des travaux ${format(oscDate, 'dd-MM-yyyy')}`, colSpan: 8, styles: { fillColor: [255, 230, 204], fontSize: 7 } }
+      { content: format(oscDate, 'dd/MM/yyyy'), styles: { fillColor: [255, 230, 204] } },
+      { content: `Ordre de service de commencement des travaux ${format(oscDate, 'dd/MM/yyyy')}`, colSpan: 8, styles: { fillColor: [255, 230, 204], fontSize: 7 } }
     ]);
   }
 
@@ -505,9 +505,9 @@ export async function generateRevisionPDF(
       // Calculate contribution for display if needed
       // const contribution = firstMonth.coefficient * firstMonth.days / rev.totalJours;
       
-      // Convert dates from yyyy-MM-dd to dd-MM-yyyy
-      const dateDebutFormatted = rev.dateDebut.split('-').reverse().join('-');
-      const dateFinFormatted = rev.dateFin.split('-').reverse().join('-');
+      // Convert dates from yyyy-MM-dd to dd/MM/yyyy
+      const dateDebutFormatted = rev.dateDebut.split('-').reverse().join('/');
+      const dateFinFormatted = rev.dateFin.split('-').reverse().join('/');
       
       revBody.push([
         { content: rev.decomptNumero === decomptRevisions[decomptRevisions.length - 1].decomptNumero ? `${rev.decomptNumero} et Dernier` : rev.decomptNumero.toString(), rowSpan: monthRows, styles: { valign: 'middle' as const, halign: 'center' as const } },

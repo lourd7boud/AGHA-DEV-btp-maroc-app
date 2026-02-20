@@ -12,6 +12,7 @@ import IntervenantAutocomplete from '../components/IntervenantAutocomplete';
 import { isWeb } from '../utils/platform';
 import { apiService } from '../services/apiService';
 import PriceRevisionFormulaEditor, { RevisionFormulaData } from '../components/project/PriceRevisionFormulaEditor';
+import DateInput from '../components/ui/DateInput';
 
 const EditProjectPage: FC = () => {
   const { t } = useTranslation();
@@ -611,11 +612,10 @@ const EditProjectPage: FC = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Date d'ouverture
               </label>
-              <input
-                type="date"
+              <DateInput
                 className="input"
                 value={formData.dateOuverture}
-                onChange={(e) => setFormData({ ...formData, dateOuverture: e.target.value })}
+                onChange={(val) => setFormData({ ...formData, dateOuverture: val })}
               />
               <p className="text-xs text-gray-500 mt-1">Date d'ouverture des plis</p>
             </div>
@@ -639,11 +639,10 @@ const EditProjectPage: FC = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 O.S.C (Date début des travaux)
               </label>
-              <input
-                type="date"
+              <DateInput
                 className="input"
                 value={formData.osc}
-                onChange={(e) => setFormData({ ...formData, osc: e.target.value })}
+                onChange={(val) => setFormData({ ...formData, osc: val })}
               />
               <p className="text-xs text-gray-500 mt-1">Ordre de Service de Commencement</p>
             </div>

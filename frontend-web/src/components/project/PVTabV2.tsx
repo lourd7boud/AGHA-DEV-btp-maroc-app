@@ -8,6 +8,7 @@
  */
 
 import { FC, useState } from 'react';
+import DateInput from '../ui/DateInput';
 import { 
   FileText, Plus, Download, Trash2, Loader2, X, Calendar, Eye, 
   Upload, Image, File, Users, CheckCircle, ClipboardList,
@@ -435,10 +436,9 @@ const PVTabV2: FC<PVTabV2Props> = ({ projectId, pvs, onRefresh }) => {
       
       case 'date':
         return (
-          <input
-            type="date"
+          <DateInput
             value={formData[field.name] || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, [field.name]: e.target.value }))}
+            onChange={(val) => setFormData(prev => ({ ...prev, [field.name]: val }))}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
           />
         );
@@ -865,10 +865,9 @@ const PVTabV2: FC<PVTabV2Props> = ({ projectId, pvs, onRefresh }) => {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Date du PV
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={uploadDate}
-                onChange={(e) => setUploadDate(e.target.value)}
+                onChange={(val) => setUploadDate(val)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               />
             </div>

@@ -5,6 +5,7 @@ import {
   Link2, AlertTriangle, DollarSign, Calendar, Lock
 } from 'lucide-react';
 import { apiService } from '../../services/apiService';
+import DateInput from '../ui/DateInput';
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -432,28 +433,25 @@ const ODSPanel: React.FC<ODSPanelProps> = ({ projectId }) => {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Date émission</label>
-              <input
-                type="date"
+              <DateInput
                 value={form.dateEmission}
-                onChange={(e) => setForm({ ...form, dateEmission: e.target.value })}
+                onChange={(val) => setForm({ ...form, dateEmission: val })}
                 className="w-full rounded-lg border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Date d'effet</label>
-              <input
-                type="date"
+              <DateInput
                 value={form.dateEffet}
-                onChange={(e) => setForm({ ...form, dateEffet: e.target.value })}
+                onChange={(val) => setForm({ ...form, dateEffet: val })}
                 className="w-full rounded-lg border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Date de fin</label>
-              <input
-                type="date"
+              <DateInput
                 value={form.dateFin}
-                onChange={(e) => setForm({ ...form, dateFin: e.target.value })}
+                onChange={(val) => setForm({ ...form, dateFin: val })}
                 className="w-full rounded-lg border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm"
               />
             </div>

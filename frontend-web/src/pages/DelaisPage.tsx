@@ -1,4 +1,5 @@
 import { FC, useState } from 'react';
+import DateInput from '../components/ui/DateInput';
 import { Project, ArretTravaux } from '../db/database';
 import { db } from '../db/database';
 import { Link } from 'react-router-dom';
@@ -558,22 +559,20 @@ const ProjectDelaiModal: FC<ProjectDelaiModalProps> = ({
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Date d'arrêt (OSA) *
                     </label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={newArret.dateArret}
-                      onChange={(e) => setNewArret({ ...newArret, dateArret: e.target.value })}
+                      onChange={(val) => setNewArret({ ...newArret, dateArret: val })}
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Date de reprise (OSR)
                     </label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={newArret.dateReprise}
-                      onChange={(e) => setNewArret({ ...newArret, dateReprise: e.target.value })}
+                      onChange={(val) => setNewArret({ ...newArret, dateReprise: val })}
                     />
                   </div>
                   <div>

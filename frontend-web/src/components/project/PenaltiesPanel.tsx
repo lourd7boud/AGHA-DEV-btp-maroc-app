@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { apiService } from '../../services/apiService';
 import type { Penalty, Bond, Retention, FinancialSummary } from '../../db/database';
+import DateInput from '../ui/DateInput';
 
 // ═══════════════════════════════════════════════════════════════
 // Types & Constants
@@ -427,19 +428,17 @@ const PenaltiesPanel: React.FC<PenaltiesPanelProps> = ({ projectId, montantMarch
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Date début</label>
-                  <input
-                    type="date"
+                  <DateInput
                     value={penaltyForm.dateDebut}
-                    onChange={(e) => setPenaltyForm({ ...penaltyForm, dateDebut: e.target.value })}
+                    onChange={(val) => setPenaltyForm({ ...penaltyForm, dateDebut: val })}
                     className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-red-500"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Date fin</label>
-                  <input
-                    type="date"
+                  <DateInput
                     value={penaltyForm.dateFin}
-                    onChange={(e) => setPenaltyForm({ ...penaltyForm, dateFin: e.target.value })}
+                    onChange={(val) => setPenaltyForm({ ...penaltyForm, dateFin: val })}
                     className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-red-500"
                   />
                 </div>
@@ -736,19 +735,17 @@ const PenaltiesPanel: React.FC<PenaltiesPanelProps> = ({ projectId, montantMarch
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Date d'émission</label>
-                  <input
-                    type="date"
+                  <DateInput
                     value={bondForm.dateEmission}
-                    onChange={(e) => setBondForm({ ...bondForm, dateEmission: e.target.value })}
+                    onChange={(val) => setBondForm({ ...bondForm, dateEmission: val })}
                     className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Date d'expiration</label>
-                  <input
-                    type="date"
+                  <DateInput
                     value={bondForm.dateExpiration}
-                    onChange={(e) => setBondForm({ ...bondForm, dateExpiration: e.target.value })}
+                    onChange={(val) => setBondForm({ ...bondForm, dateExpiration: val })}
                     className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

@@ -6,6 +6,7 @@ import {
   Save, Edit3, X, ArrowRight
 } from 'lucide-react';
 import { apiService } from '../../services/apiService';
+import DateInput from '../ui/DateInput';
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -483,9 +484,9 @@ export default function GanttPanel({ projectId }: { projectId: string }) {
             {/* Date début */}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Date début *</label>
-              <input
-                type="date" required value={formData.dateDebut}
-                onChange={e => setFormData(p => ({ ...p, dateDebut: e.target.value }))}
+              <DateInput
+                required value={formData.dateDebut}
+                onChange={val => setFormData(p => ({ ...p, dateDebut: val }))}
                 className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
               />
             </div>
@@ -493,9 +494,9 @@ export default function GanttPanel({ projectId }: { projectId: string }) {
             {/* Date fin */}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Date fin *</label>
-              <input
-                type="date" required value={formData.dateFin}
-                onChange={e => setFormData(p => ({ ...p, dateFin: e.target.value }))}
+              <DateInput
+                required value={formData.dateFin}
+                onChange={val => setFormData(p => ({ ...p, dateFin: val }))}
                 className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
               />
             </div>
