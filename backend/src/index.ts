@@ -82,9 +82,16 @@ app.use(helmet({
 }));
 
 // SECURITY: Explicit CORS origins instead of wildcard with credentials
+const DEFAULT_ORIGINS = [
+  'https://marocinfra.com',
+  'https://www.marocinfra.com',
+  'https://dev.marocinfra.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
-  : ['http://localhost:5173', 'http://localhost:3000'];  // Dev defaults only
+  : DEFAULT_ORIGINS;
 
 app.use(cors({
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
