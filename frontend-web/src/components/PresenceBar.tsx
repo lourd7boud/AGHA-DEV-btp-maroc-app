@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Wifi, ChevronDown } from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
 import { getRealtimeSocket } from '../services/realtimeSync';
 import { apiService } from '../services/apiService';
 import { useAuthStore } from '../store/authStore';
@@ -41,6 +42,69 @@ function getPageLabel(path: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Presence Socket Manager — standalone connection for Web users
+// ═══════════════════════════════════════════════════════════════
+
+let presenceSocket: Socket | null = null;
+
+function getOrCreatePresenceSocket(): Socket | null {
+  // First try the realtimeSync socket (works for Electron)
+  const rtSocket = getRealtimeSocket();
+  if (rtSocket?.connected) return rtSocket;
+
+  // For Web: create a dedicated presence socket if not yet created
+  if (presenceSocket?.connected) return presenceSocket;
+
+  const token = localStorage.getItem('authToken');
+  if (!token) return null;
+
+  // Determine socket URL
+  let socketUrl: string;
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    socketUrl = window.location.origin;
+  } else {
+    socketUrl = 'http://localhost:5000';
+  }
+
+  console.log('🟢 [Presence] Creating dedicated presence socket:', socketUrl);
+
+  presenceSocket = io(socketUrl, {
+    path: '/socket.io/',
+    auth: { token, deviceId: 'web-presence' },
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: 5000,
+    reconnectionDelayMax: 30000,
+    timeout: 20000,
+    forceNew: false,
+  });
+
+  presenceSocket.on('connect', () => {
+    console.log('🟢 [Presence] Socket connected:', presenceSocket?.id);
+  });
+
+  presenceSocket.on('connect_error', (err) => {
+    console.warn('🔴 [Presence] Socket connect error:', err.message);
+  });
+
+  presenceSocket.on('disconnect', (reason) => {
+    console.log('🟡 [Presence] Socket disconnected:', reason);
+  });
+
+  return presenceSocket;
+}
+
+// Cleanup on page unload
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    if (presenceSocket) {
+      presenceSocket.disconnect();
+      presenceSocket = null;
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
 // PresenceBar Component
 // ═══════════════════════════════════════════════════════════════
 
@@ -51,10 +115,23 @@ export default function PresenceBar() {
   const [showDropdown, setShowDropdown] = useState(false);
   const heartbeatRef = useRef<ReturnType<typeof setInterval>>();
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const socketRef = useRef<Socket | null>(null);
+
+  // Initialize socket connection
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // Small delay to let auth settle
+    const timer = setTimeout(() => {
+      socketRef.current = getOrCreatePresenceSocket();
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [currentUser]);
 
   // Send heartbeat with current page info
   const sendHeartbeat = useCallback(() => {
-    const socket = getRealtimeSocket();
+    const socket = socketRef.current || getOrCreatePresenceSocket();
     if (!socket?.connected) return;
 
     socket.emit('presence:heartbeat', {
@@ -81,18 +158,28 @@ export default function PresenceBar() {
 
   // Listen for socket presence updates
   useEffect(() => {
-    const socket = getRealtimeSocket();
-    if (!socket) return;
+    if (!currentUser) return;
 
-    const handlePresenceUpdate = () => {
-      // Debounce: reload online list
-      apiService.getOnlineUsers().then(result => {
-        setOnlineUsers((result.data || []).filter((u: OnlineUser) => u.id !== currentUser?.id));
-      }).catch(() => {});
+    // Wait for socket to be ready
+    const checkSocket = () => {
+      const socket = socketRef.current || getOrCreatePresenceSocket();
+      if (!socket) return;
+
+      socketRef.current = socket;
+
+      const handlePresenceUpdate = () => {
+        apiService.getOnlineUsers().then(result => {
+          setOnlineUsers((result.data || []).filter((u: OnlineUser) => u.id !== currentUser?.id));
+        }).catch(() => {});
+      };
+
+      socket.on('presence:update', handlePresenceUpdate);
+      return () => { socket.off('presence:update', handlePresenceUpdate); };
     };
 
-    socket.on('presence:update', handlePresenceUpdate);
-    return () => { socket.off('presence:update', handlePresenceUpdate); };
+    // Retry a few times in case socket isn't ready yet
+    const timer = setTimeout(checkSocket, 2000);
+    return () => clearTimeout(timer);
   }, [currentUser?.id]);
 
   // Heartbeat on location change + periodic
