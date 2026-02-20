@@ -35,6 +35,22 @@ const getApiUrl = () => {
 
 class ApiService {
   private client: AxiosInstance;
+  private isRefreshing = false;
+  private failedQueue: Array<{
+    resolve: (token: string) => void;
+    reject: (error: any) => void;
+  }> = [];
+
+  private processQueue(error: any, token: string | null = null) {
+    this.failedQueue.forEach(({ resolve, reject }) => {
+      if (token) {
+        resolve(token);
+      } else {
+        reject(error);
+      }
+    });
+    this.failedQueue = [];
+  }
 
   constructor() {
     const baseURL = getApiUrl();
@@ -109,8 +125,25 @@ class ApiService {
             !originalRequest.url?.includes('/auth/refresh') &&
             !(originalRequest as any)._retry) {
           
+          // If already refreshing, queue this request to wait
+          if (this.isRefreshing) {
+            return new Promise<any>((resolve, reject) => {
+              this.failedQueue.push({
+                resolve: (token: string) => {
+                  originalRequest.headers = originalRequest.headers || {};
+                  originalRequest.headers.Authorization = `Bearer ${token}`;
+                  resolve(this.client.request(originalRequest));
+                },
+                reject: (err: any) => {
+                  reject(err);
+                }
+              });
+            });
+          }
+
           // Mark this request as retried to avoid infinite loops
           (originalRequest as any)._retry = true;
+          this.isRefreshing = true;
           
           // Try to refresh token
           const token = localStorage.getItem('authToken');
@@ -132,6 +165,10 @@ class ApiService {
                 console.log('✅ Token refreshed successfully');
                 this.updateStoredToken(newToken);
                 
+                // Resolve all queued requests with the new token
+                this.processQueue(null, newToken);
+                this.isRefreshing = false;
+                
                 // Retry original request with new token
                 originalRequest.headers = originalRequest.headers || {};
                 originalRequest.headers.Authorization = `Bearer ${newToken}`;
@@ -140,6 +177,10 @@ class ApiService {
             } catch (refreshError: any) {
               const refreshStatus = refreshError.response?.status;
               console.log('🔒 Token refresh failed:', refreshStatus || refreshError.message);
+              
+              // Reject all queued requests
+              this.processQueue(refreshError, null);
+              this.isRefreshing = false;
               
               // Only logout if refresh truly failed with auth error (not server/network error)
               if (refreshStatus === 401 || refreshStatus === 403) {
@@ -152,7 +193,9 @@ class ApiService {
               }
             }
           } else {
-            // No token at all, redirect to login
+            // No token at all, reject queued and redirect to login
+            this.processQueue(error, null);
+            this.isRefreshing = false;
             this.handleLogout();
           }
         }
