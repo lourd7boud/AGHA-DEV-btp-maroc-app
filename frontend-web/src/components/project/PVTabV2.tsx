@@ -355,14 +355,34 @@ const PVTabV2: FC<PVTabV2Props> = ({ projectId, pvs, onRefresh }) => {
     window.open(url, '_blank');
   };
 
-  const handleDownload = (pv: ProjectAsset) => {
-    const url = assetService.getAssetUrl(pv.storagePath);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = pv.originalName || pv.fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownload = async (pv: ProjectAsset) => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const url = assetService.getAssetUrl(pv.storagePath);
+      const response = await fetch(url, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = pv.originalName || pv.fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Download error:', error);
+      const url = assetService.getAssetUrl(pv.storagePath);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = pv.originalName || pv.fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   const closeCreateModal = () => {

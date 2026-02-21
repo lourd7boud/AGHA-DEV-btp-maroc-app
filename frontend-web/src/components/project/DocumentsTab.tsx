@@ -83,14 +83,36 @@ const DocumentsTab: FC<DocumentsTabProps> = ({ projectId, documents, onRefresh }
     }
   };
 
-  const handleDownload = (doc: ProjectAsset) => {
-    const url = assetService.getAssetUrl(doc.storagePath);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = doc.originalName || doc.fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownload = async (doc: ProjectAsset) => {
+    try {
+      // Use fetch with Bearer token for reliable authenticated download
+      const token = localStorage.getItem('auth_token');
+      const url = assetService.getAssetUrl(doc.storagePath);
+      const response = await fetch(url, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        credentials: 'include', // Also send cookie as fallback
+      });
+      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = doc.originalName || doc.fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Download error:', error);
+      // Fallback: direct link (relies on cookie)
+      const url = assetService.getAssetUrl(doc.storagePath);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = doc.originalName || doc.fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   const handleView = (doc: ProjectAsset) => {

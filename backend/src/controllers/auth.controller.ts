@@ -13,6 +13,22 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'; // 7 days for better 
 const JWT_REFRESH_SECRET: Secret = process.env.JWT_REFRESH_SECRET || 'dev-only-refresh-secret-do-not-use';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d'; // 30 days refresh
 
+// Cookie maxAge must match JWT_EXPIRES_IN for static file access (images, PDFs, documents)
+// Parse JWT_EXPIRES_IN to milliseconds — default 7 days
+function parseJwtExpiryToMs(expiry: string): number {
+  const match = expiry.match(/^(\d+)([smhd])$/);
+  if (!match) return 7 * 24 * 60 * 60 * 1000; // fallback 7 days
+  const value = parseInt(match[1], 10);
+  switch (match[2]) {
+    case 's': return value * 1000;
+    case 'm': return value * 60 * 1000;
+    case 'h': return value * 60 * 60 * 1000;
+    case 'd': return value * 24 * 60 * 60 * 1000;
+    default: return 7 * 24 * 60 * 60 * 1000;
+  }
+}
+const COOKIE_MAX_AGE = parseJwtExpiryToMs(JWT_EXPIRES_IN);
+
 // SECURITY: Bcrypt cost factor — 12 is the minimum recommended (was 10)
 const BCRYPT_ROUNDS = 12;
 
@@ -167,13 +183,13 @@ export const login = async (
       [user.id]
     );
 
-    // Set auth cookie for static file access (images, documents)
+    // Set auth cookie for static file access (images, documents, PDFs)
     const isProduction = process.env.NODE_ENV === 'production';
     res.cookie('auth_token', token, {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? 'strict' : 'lax',
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours (matches JWT_EXPIRES_IN)
+      maxAge: COOKIE_MAX_AGE, // Must match JWT_EXPIRES_IN (7d = 604800000ms)
       path: '/',
     });
 
@@ -285,7 +301,7 @@ export const refreshToken = async (
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? 'strict' : 'lax',
-      maxAge: 24 * 60 * 60 * 1000,
+      maxAge: COOKIE_MAX_AGE, // Must match JWT_EXPIRES_IN (7d = 604800000ms)
       path: '/',
     });
 

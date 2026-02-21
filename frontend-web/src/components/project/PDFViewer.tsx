@@ -30,13 +30,17 @@ const PDFViewer: FC<PDFViewerProps> = ({ url, fileName, onClose, onDownload }) =
   const [hasError, setHasError] = useState(false);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
 
-  // For Electron: fetch PDF and create blob URL to avoid CORS/CSP issues
+  // Fetch PDF with Bearer token for reliable authenticated access
   useEffect(() => {
-    const isElectron = typeof window !== 'undefined' && (window as any).electronAPI?.isElectron;
-    
-    if (isElectron && url.startsWith('http')) {
-      // Fetch PDF as blob for Electron
-      fetch(url)
+    // Always fetch with auth token to avoid cookie-only dependency
+    if (url.startsWith('http') || url.startsWith('/')) {
+      const token = localStorage.getItem('auth_token');
+      const fetchUrl = url.startsWith('/') ? `${window.location.origin}${url}` : url;
+      
+      fetch(fetchUrl, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        credentials: 'include', // Also send cookie as fallback
+      })
         .then(response => {
           if (!response.ok) throw new Error('Failed to fetch PDF');
           return response.blob();
@@ -47,11 +51,12 @@ const PDFViewer: FC<PDFViewerProps> = ({ url, fileName, onClose, onDownload }) =
           setIsLoading(false);
         })
         .catch(() => {
-          setHasError(true);
+          // Fallback: try direct URL (relies on cookie)
+          setPdfBlobUrl(url);
           setIsLoading(false);
         });
     } else {
-      // For web, use URL directly
+      // Blob URL or other scheme
       setPdfBlobUrl(url);
     }
 

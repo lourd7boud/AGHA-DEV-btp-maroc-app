@@ -75,14 +75,34 @@ const PhotosTab: FC<PhotosTabProps> = ({ projectId, photos, onRefresh }) => {
     }
   };
 
-  const handleDownload = (photo: ProjectAsset) => {
-    const url = assetService.getAssetUrl(photo.storagePath);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = photo.originalName || photo.fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownload = async (photo: ProjectAsset) => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const url = assetService.getAssetUrl(photo.storagePath);
+      const response = await fetch(url, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = photo.originalName || photo.fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Download error:', error);
+      const url = assetService.getAssetUrl(photo.storagePath);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = photo.originalName || photo.fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   // Empty state
