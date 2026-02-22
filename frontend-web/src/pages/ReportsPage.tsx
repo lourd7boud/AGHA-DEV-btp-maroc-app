@@ -4,8 +4,9 @@ import {
   BarChart3, TrendingUp, DollarSign, FolderKanban,
   Clock, Activity, FileText, AlertTriangle, Briefcase,
   FileSignature, PieChart, ArrowUpRight, ArrowDownRight,
-  Calendar, RefreshCw, ChevronRight
+  Calendar, RefreshCw, ChevronRight, FileSpreadsheet, FileDown
 } from 'lucide-react';
+import { exportDelaisExcel, exportDelaisPDF } from '../utils/delaisExport';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart as RechartsPie, Pie, Cell,
@@ -46,6 +47,7 @@ const ReportsPage: React.FC = () => {
   const [financialData, setFinancialData] = useState<any[]>([]);
   const [deadlinesData, setDeadlinesData] = useState<any[]>([]);
   const [activityData, setActivityData] = useState<any[]>([]);
+  const [exporting, setExporting] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -501,10 +503,50 @@ const ReportsPage: React.FC = () => {
       {activeTab === 'deadlines' && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border p-5 shadow-sm">
-            <h3 className="font-semibold text-gray-700 mb-4 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-blue-500" />
-              Suivi des délais
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-700 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-blue-500" />
+                Suivi des délais
+              </h3>
+              {deadlinesData.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      setExporting('excel');
+                      try { await exportDelaisExcel(deadlinesData); }
+                      catch (e) { console.error('Export Excel error:', e); }
+                      finally { setExporting(null); }
+                    }}
+                    disabled={!!exporting}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50"
+                  >
+                    {exporting === 'excel' ? (
+                      <div className="w-3.5 h-3.5 border-2 border-green-300 border-t-green-600 rounded-full animate-spin" />
+                    ) : (
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                    )}
+                    Exporter Excel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setExporting('pdf');
+                      try { await exportDelaisPDF(deadlinesData); }
+                      catch (e) { console.error('Export PDF error:', e); }
+                      finally { setExporting(null); }
+                    }}
+                    disabled={!!exporting}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors disabled:opacity-50"
+                  >
+                    {exporting === 'pdf' ? (
+                      <div className="w-3.5 h-3.5 border-2 border-red-300 border-t-red-600 rounded-full animate-spin" />
+                    ) : (
+                      <FileDown className="w-3.5 h-3.5" />
+                    )}
+                    Exporter PDF
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="space-y-3">
               {deadlinesData.map((p: any) => {
                 const jours = Number(p.joursRestants) || 0;
