@@ -217,6 +217,7 @@ export const getDeadlinesReport = async (req: AuthRequest, res: Response, next: 
         p.id,
         p.objet,
         p.marche_no,
+        p.societe,
         p.osc as date_commencement,
         p.delais_execution,
         p.achevement_travaux,
@@ -231,9 +232,9 @@ export const getDeadlinesReport = async (req: AuthRequest, res: Response, next: 
         END as date_fin_prevue,
         CASE 
           WHEN p.osc IS NOT NULL AND p.delais_execution IS NOT NULL THEN
-            GREATEST(0, EXTRACT(DAY FROM 
+            EXTRACT(DAY FROM 
               (p.osc + (p.delais_execution * 30 || ' days')::interval) - NOW()
-            ))
+            )
           ELSE NULL
         END as jours_restants,
         COALESCE((
@@ -247,8 +248,7 @@ export const getDeadlinesReport = async (req: AuthRequest, res: Response, next: 
       FROM projects p
       WHERE p.user_id = $1 AND p.deleted_at IS NULL
       ORDER BY 
-        CASE WHEN p.status IN ('active','en_cours') THEN 0 ELSE 1 END,
-        p.osc DESC NULLS LAST
+        p.marche_no ASC NULLS LAST
     `, [req.user.id]);
 
     res.json({

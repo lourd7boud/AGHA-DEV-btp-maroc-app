@@ -12,6 +12,7 @@ interface DeadlineProject {
   id: string;
   objet: string;
   marcheNo?: string;
+  societe?: string;
   status: string;
   dateCommencement?: string;
   delaisExecution?: number;
@@ -46,11 +47,22 @@ function getStatusLabel(status: string): string {
   return STATUS_LABELS[status] || status;
 }
 
+function getRealDaysRemaining(p: DeadlineProject): number {
+  // Calculate real days remaining (negative = overdue)
+  if (!p.dateCommencement || !p.delaisExecution) return 0;
+  const start = new Date(p.dateCommencement);
+  const endDate = new Date(start);
+  endDate.setDate(endDate.getDate() + p.delaisExecution * 30);
+  const now = new Date();
+  const diffMs = endDate.getTime() - now.getTime();
+  return Math.round(diffMs / (1000 * 60 * 60 * 24));
+}
+
 function getDeadlineStatus(p: DeadlineProject): { label: string; color: string } {
   if (!p.dateCommencement || !p.delaisExecution) {
     return { label: 'Dates non définies', color: '#9CA3AF' };
   }
-  const jours = Number(p.joursRestants) || 0;
+  const jours = getRealDaysRemaining(p);
   const isActive = p.status === 'active' || p.status === 'en_cours';
   if (p.status === 'completed' || p.status === 'termine') {
     return { label: 'Terminé', color: '#10B981' };
@@ -108,11 +120,18 @@ function calculateTotalArretDays(p: DeadlineProject): number {
 export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<void> {
   const wb = XLSX.utils.book_new();
 
+  // Sort by N° Marché ascending
+  const sorted = [...projects].sort((a, b) => {
+    const aNo = (a.marcheNo || '').replace(/[^0-9]/g, '');
+    const bNo = (b.marcheNo || '').replace(/[^0-9]/g, '');
+    return (parseInt(aNo) || 9999) - (parseInt(bNo) || 9999);
+  });
+
   // ─── Sheet 1: Tableau récapitulatif ────────────────
   const summaryHeaders = [
     'N°',
     'N° Marché',
-    'Objet du Projet',
+    'Entreprise',
     'Statut Projet',
     'Date Commencement (OSC)',
     'Délai d\'Exécution (mois)',
@@ -130,11 +149,12 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
     'Observations',
   ];
 
-  const summaryRows = projects.map((p, i) => {
+  const summaryRows = sorted.map((p, i) => {
     const status = getDeadlineStatus(p);
     const progress = calculateProgress(p);
     const totalArretDays = calculateTotalArretDays(p);
     const delaisJours = p.delaisExecution ? p.delaisExecution * 30 : 0;
+    const realDays = getRealDaysRemaining(p);
 
     // Calculate effective end date (with arrêts)
     let dateFinEffective = '—';
@@ -146,7 +166,7 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
 
     // Observations
     const obs: string[] = [];
-    if (status.label === 'En retard') obs.push('⚠️ PROJET EN RETARD');
+    if (status.label === 'En retard') obs.push(`⚠️ EN RETARD de ${Math.abs(realDays)} jours`);
     if (status.label.startsWith('Urgent')) obs.push('⏰ Délai urgent');
     if (Number(p.nbArrets) > 0) obs.push(`${p.nbArrets} arrêt(s) enregistré(s)`);
     if (p.dateReceptionProvisoire) obs.push('Réception provisoire effectuée');
@@ -155,13 +175,13 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
     return [
       i + 1,
       p.marcheNo || '—',
-      p.objet || '—',
+      p.societe || '—',
       getStatusLabel(p.status),
       p.dateCommencement ? formatDate(p.dateCommencement) : '—',
       p.delaisExecution || '—',
       delaisJours || '—',
       p.dateFinPrevue ? formatDate(p.dateFinPrevue) : '—',
-      p.joursRestants != null ? Math.round(Number(p.joursRestants)) : '—',
+      realDays,
       progress,
       status.label,
       Number(p.nbArrets) || 0,
@@ -177,7 +197,7 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
   const summarySheet = XLSX.utils.aoa_to_sheet([
     ['SUIVI DES DÉLAIS — RAPPORT MULTI-PROJETS'],
     [`Date d'export: ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR')}`],
-    [`Nombre total de projets: ${projects.length}`],
+    [`Nombre total de projets: ${sorted.length}`],
     [],
     summaryHeaders,
     ...summaryRows,
@@ -187,7 +207,7 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
   summarySheet['!cols'] = [
     { wch: 5 },   // N°
     { wch: 18 },  // N° Marché
-    { wch: 55 },  // Objet
+    { wch: 35 },  // Entreprise
     { wch: 12 },  // Statut
     { wch: 18 },  // Date Commencement
     { wch: 12 },  // Délai mois
@@ -245,17 +265,17 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
     [],
     ['PROJETS EN RETARD — DÉTAILS'],
     [],
-    ['N° Marché', 'Objet', 'Date Fin Prévue', 'Jours de Retard', 'Nb Arrêts'],
-    ...projects
+    ['N° Marché', 'Entreprise', 'Date Fin Prévue', 'Jours de Retard', 'Nb Arrêts'],
+    ...sorted
       .filter(p => {
-        const j = Number(p.joursRestants) || 0;
-        return j <= 0 && (p.status === 'active' || p.status === 'en_cours');
+        const days = getRealDaysRemaining(p);
+        return days <= 0 && (p.status === 'active' || p.status === 'en_cours');
       })
       .map(p => [
         p.marcheNo || '—',
-        p.objet || '—',
+        p.societe || '—',
         formatDate(p.dateFinPrevue),
-        Math.abs(Math.round(Number(p.joursRestants) || 0)),
+        Math.abs(getRealDaysRemaining(p)),
         Number(p.nbArrets) || 0,
       ]),
   ];
@@ -271,11 +291,11 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
 
   // ─── Sheet 3: Détail des Arrêts ──────────────────
   const arretsHeaders = [
-    'N° Marché', 'Objet du Projet', 'Date Arrêt (OSA)', 'Date Reprise (OSR)',
+    'N° Marché', 'Entreprise', 'Date Arrêt (OSA)', 'Date Reprise (OSR)',
     'Durée Arrêt (jours)', 'Motif', 'En cours',
   ];
   const arretsRows: any[][] = [];
-  for (const p of projects) {
+  for (const p of sorted) {
     if (p.arrets && p.arrets.length > 0) {
       for (const a of p.arrets) {
         const dStart = new Date(a.dateArret).getTime();
@@ -283,7 +303,7 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
         const days = Math.max(0, Math.round((dEnd - dStart) / (1000 * 60 * 60 * 24)));
         arretsRows.push([
           p.marcheNo || '—',
-          p.objet || '—',
+          p.societe || p.objet || '—',
           formatDate(a.dateArret),
           a.dateReprise ? formatDate(a.dateReprise) : '—',
           days,
@@ -303,7 +323,7 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
       ...arretsRows,
     ]);
     arretsSheet['!cols'] = [
-      { wch: 18 }, { wch: 55 }, { wch: 16 }, { wch: 16 },
+      { wch: 18 }, { wch: 35 }, { wch: 16 }, { wch: 16 },
       { wch: 16 }, { wch: 40 }, { wch: 10 },
     ];
     arretsSheet['!merges'] = [
@@ -314,11 +334,11 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
 
   // ─── Sheet 4: Échéancier (Timeline) ──────────────
   const timelineHeaders = [
-    'N° Marché', 'Objet', 'OSC (Début)', 'Fin Prévue Initiale',
+    'N° Marché', 'Entreprise', 'OSC (Début)', 'Fin Prévue Initiale',
     'Jours Arrêt', 'Fin Prévue Effective', 'Achèvement Travaux',
     'Réception Provisoire', 'Réception Définitive', 'Délai Consommé (%)',
   ];
-  const timelineRows = projects
+  const timelineRows = sorted
     .filter(p => p.dateCommencement && p.delaisExecution)
     .map(p => {
       const totalArretDays = calculateTotalArretDays(p);
@@ -330,7 +350,7 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
 
       return [
         p.marcheNo || '—',
-        p.objet || '—',
+        p.societe || p.objet || '—',
         formatDate(p.dateCommencement),
         formatDate(endInit.toISOString()),
         totalArretDays,
@@ -350,7 +370,7 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
     ...timelineRows,
   ]);
   timelineSheet['!cols'] = [
-    { wch: 18 }, { wch: 55 }, { wch: 16 }, { wch: 18 },
+    { wch: 18 }, { wch: 35 }, { wch: 16 }, { wch: 18 },
     { wch: 12 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
     { wch: 18 }, { wch: 16 },
   ];
@@ -371,6 +391,13 @@ export async function exportDelaisExcel(projects: DeadlineProject[]): Promise<vo
 // ═══════════════════════════════════════════════════════════════
 
 export async function exportDelaisPDF(projects: DeadlineProject[]): Promise<void> {
+  // Sort by N° Marché ascending
+  const sorted = [...projects].sort((a, b) => {
+    const aNo = (a.marcheNo || '').replace(/[^0-9]/g, '');
+    const bNo = (b.marcheNo || '').replace(/[^0-9]/g, '');
+    return (parseInt(aNo) || 9999) - (parseInt(bNo) || 9999);
+  });
+
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
 
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -385,24 +412,24 @@ export async function exportDelaisPDF(projects: DeadlineProject[]): Promise<void
   doc.text('SUIVI DES DÉLAIS — RAPPORT MULTI-PROJETS', 15, 13);
   doc.setFontSize(10);
   doc.text(
-    `Date d'export: ${new Date().toLocaleDateString('fr-FR')} | Nombre de projets: ${projects.length}`,
+    `Date d'export: ${new Date().toLocaleDateString('fr-FR')} | Nombre de projets: ${sorted.length}`,
     15, 22
   );
 
   // ─── Statistics Summary ──────────────────────────
-  const enRetard = projects.filter(p => {
-    const j = Number(p.joursRestants) || 0;
+  const enRetard = sorted.filter(p => {
+    const j = getRealDaysRemaining(p);
     return j <= 0 && (p.status === 'active' || p.status === 'en_cours');
   }).length;
-  const urgent = projects.filter(p => {
-    const j = Number(p.joursRestants) || 0;
+  const urgent = sorted.filter(p => {
+    const j = getRealDaysRemaining(p);
     return j > 0 && j <= 30 && (p.status === 'active' || p.status === 'en_cours');
   }).length;
-  const enCours = projects.filter(p => {
-    const j = Number(p.joursRestants) || 0;
+  const enCours = sorted.filter(p => {
+    const j = getRealDaysRemaining(p);
     return j > 30 && (p.status === 'active' || p.status === 'en_cours');
   }).length;
-  const termines = projects.filter(p => p.status === 'completed' || p.status === 'termine').length;
+  const termines = sorted.filter(p => p.status === 'completed' || p.status === 'termine').length;
 
   let yPos = 35;
 
@@ -436,7 +463,7 @@ export async function exportDelaisPDF(projects: DeadlineProject[]): Promise<void
   const tableHeaders = [
     'N°',
     'N° Marché',
-    'Objet du Projet',
+    'Entreprise',
     'Statut',
     'OSC (Début)',
     'Délai\n(mois)',
@@ -451,20 +478,21 @@ export async function exportDelaisPDF(projects: DeadlineProject[]): Promise<void
     'Récep.\nDéf.',
   ];
 
-  const tableRows = projects.map((p, i) => {
+  const tableRows = sorted.map((p, i) => {
     const status = getDeadlineStatus(p);
     const progress = calculateProgress(p);
     const totalArretDays = calculateTotalArretDays(p);
+    const realDays = getRealDaysRemaining(p);
 
     return [
       String(i + 1),
       p.marcheNo || '—',
-      (p.objet || '—').substring(0, 65) + ((p.objet?.length || 0) > 65 ? '...' : ''),
+      (p.societe || '—').substring(0, 45) + ((p.societe?.length || 0) > 45 ? '...' : ''),
       getStatusLabel(p.status),
       formatDate(p.dateCommencement),
       p.delaisExecution ? String(p.delaisExecution) : '—',
       formatDate(p.dateFinPrevue),
-      p.joursRestants != null ? String(Math.round(Number(p.joursRestants))) : '—',
+      String(realDays),
       String(progress),
       status.label.replace(/\s*\(\d+j\)/, ''),
       String(Number(p.nbArrets) || 0),
@@ -498,7 +526,7 @@ export async function exportDelaisPDF(projects: DeadlineProject[]): Promise<void
     columnStyles: {
       0: { halign: 'center', cellWidth: 8 },
       1: { cellWidth: 22 },
-      2: { cellWidth: 65 },
+      2: { cellWidth: 50 },
       3: { halign: 'center', cellWidth: 16 },
       4: { halign: 'center', cellWidth: 20 },
       5: { halign: 'center', cellWidth: 12 },
