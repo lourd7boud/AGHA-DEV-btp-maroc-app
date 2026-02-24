@@ -1621,12 +1621,12 @@ const MetrePage: FC = () => {
                     ) : (
                       <input
                         type="number"
-                        value={ligne.nombreSemblables || ''}
-                        onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'nombreSemblables', parseInt(e.target.value) || 1)}
+                        value={ligne.nombreSemblables != null ? ligne.nombreSemblables : ''}
+                        onChange={(e) => handleLigneChange(item.bordereauLigneId, ligne.id, 'nombreSemblables', e.target.value === '' ? 0 : parseInt(e.target.value))}
                         className="input text-sm text-center w-full"
                         step="1"
-                        min="1"
-                        placeholder="1"
+                        min="0"
+                        placeholder="0"
                       />
                     )}
                   </td>

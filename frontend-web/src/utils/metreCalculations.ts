@@ -122,7 +122,7 @@ export function calculatePartiel(
   const calcType = CALCULATION_TYPES_CONFIG[unite];
   
   // Le multiplicateur par défaut est 1 si non spécifié
-  const multiplier = toDecimal(nombreSemblables && nombreSemblables > 0 ? nombreSemblables : 1);
+  const multiplier = toDecimal(nombreSemblables != null && nombreSemblables >= 0 ? nombreSemblables : 1);
   
   let result = toDecimal(0);
   
