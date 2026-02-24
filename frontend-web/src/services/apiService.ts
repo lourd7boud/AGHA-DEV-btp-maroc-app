@@ -475,6 +475,11 @@ class ApiService {
     return response.data;
   }
 
+  async insertPeriodeBefore(periodeId: string) {
+    const response = await this.client.post(`/periodes/insert-before/${periodeId}`);
+    return response.data;
+  }
+
   async permanentDeleteProject(id: string) {
     const response = await this.client.delete(`/projects/${id}/permanent`);
     return response.data;

@@ -55,6 +55,7 @@ import {
   BookOpen,
   FileSignature,
   GanttChart,
+  ListPlus,
 } from 'lucide-react';
 import { format, isValid, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -107,6 +108,8 @@ const ProjectDetailPage: FC = () => {
 
   // 🔴 Delete Métré state
   const [deleteMetreModal, setDeleteMetreModal] = useState<{ open: boolean; periodeId: string | null; numero: number }>({ open: false, periodeId: null, numero: 0 });
+  const [insertBeforeModal, setInsertBeforeModal] = useState<{ open: boolean; periodeId: string | null; numero: number }>({ open: false, periodeId: null, numero: 0 });
+  const [isInserting, setIsInserting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Support both formats: with "project:" prefix and without
@@ -474,6 +477,115 @@ const ProjectDetailPage: FC = () => {
 
     // الانتقال لصفحة تحرير الميتري مع معرف الـ période
     navigate(`/projects/${rawId}/metre/${periodeId.replace('periode:', '')}`);
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ➕ INSERT PÉRIODE BEFORE HANDLER
+  // ═══════════════════════════════════════════════════════════════════════════
+  const handleInsertPeriodeBefore = async () => {
+    if (!insertBeforeModal.periodeId || !user || !rawId) return;
+    if (!canModify) {
+      alert(cannotModifyReason || 'Vous ne pouvez pas modifier les données en mode hors ligne');
+      return;
+    }
+
+    setIsInserting(true);
+    const periodeId = insertBeforeModal.periodeId;
+    const cleanPeriodeId = periodeId.replace('periode:', '');
+
+    try {
+      if (isWeb()) {
+        const res = await apiService.insertPeriodeBefore(cleanPeriodeId);
+        console.log('[handleInsertPeriodeBefore] Result:', res);
+
+        // Refresh data
+        refreshPeriodes();
+        refreshDecompts();
+
+        // Navigate to the new période
+        const newPeriodeId = res.data?.id || res.id;
+        if (newPeriodeId) {
+          const navId = newPeriodeId.replace('periode:', '');
+          navigate(`/projects/${rawId}/metre/${navId}`);
+        }
+      } else {
+        // Electron/offline: manual IndexedDB insertion
+        const allPeriodes = await db.periodes
+          .where('projectId').equals(id!)
+          .and((p: any) => !p.deletedAt)
+          .sortBy('numero');
+
+        const targetPeriode = allPeriodes.find((p: any) => p.id === periodeId);
+        if (!targetPeriode) throw new Error('Période introuvable');
+
+        const insertAt = targetPeriode.numero;
+        const now = new Date().toISOString();
+
+        // Renumber from highest to lowest to avoid unique constraint
+        const toShift = allPeriodes.filter((p: any) => p.numero >= insertAt).reverse();
+        for (const p of toShift) {
+          const newNumero = p.numero + 1;
+          await db.periodes.update(p.id, {
+            numero: newNumero,
+            libelle: p.libelle?.startsWith('Période ') ? `Période ${newNumero}` : p.libelle,
+            updatedAt: now,
+          });
+          await logSyncOperation('UPDATE', 'periode', p.id.replace('periode:', ''), { numero: newNumero }, user.id);
+
+          // Update related décomptes
+          const relatedDecompts = await db.decompts
+            .where('periodeId').equals(p.id)
+            .and((d: any) => !d.deletedAt)
+            .toArray();
+          for (const d of relatedDecompts) {
+            await db.decompts.update(d.id, { numero: newNumero, updatedAt: now });
+            await logSyncOperation('UPDATE', 'decompt', d.id.replace('decompt:', ''), { numero: newNumero }, user.id);
+          }
+        }
+
+        // Create new période
+        const newPeriodeId = `periode:${uuidv4()}`;
+        const newPeriode = {
+          id: newPeriodeId,
+          projectId: id!,
+          userId: user.id,
+          numero: insertAt,
+          libelle: `Période ${insertAt}`,
+          dateDebut: now,
+          dateFin: now,
+          statut: 'en_cours' as const,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await db.periodes.add(newPeriode);
+        await logSyncOperation('CREATE', 'periode', newPeriodeId.replace('periode:', ''), newPeriode, user.id);
+
+        // Create draft décompte
+        const decomptId = `decompt:${uuidv4()}`;
+        const newDecompt = {
+          id: decomptId,
+          projectId: id!,
+          periodeId: newPeriodeId,
+          userId: user.id,
+          numero: insertAt,
+          lignes: [],
+          montantTotal: 0,
+          statut: 'draft' as const,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await db.decompts.add(newDecompt);
+        await logSyncOperation('CREATE', 'decompt', decomptId.replace('decompt:', ''), newDecompt, user.id);
+
+        navigate(`/projects/${rawId}/metre/${newPeriodeId.replace('periode:', '')}`);
+      }
+    } catch (error: any) {
+      console.error('[handleInsertPeriodeBefore] Error:', error);
+      alert('Erreur: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setIsInserting(false);
+      setInsertBeforeModal({ open: false, periodeId: null, numero: 0 });
+    }
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1227,6 +1339,18 @@ const ProjectDetailPage: FC = () => {
                                   </p>
                                 </div>
                                 
+                                {/* Insert Before Button */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setInsertBeforeModal({ open: true, periodeId: periode.id, numero: periode.numero });
+                                  }}
+                                  className="p-2 text-gray-400 hover:text-primary-500 hover:bg-primary-50 rounded-lg transition-colors"
+                                  title="Insérer une période avant"
+                                >
+                                  <ListPlus className="w-5 h-5" />
+                                </button>
+                                
                                 {/* Delete Button */}
                                 <button
                                   onClick={(e) => {
@@ -1616,6 +1740,64 @@ const ProjectDetailPage: FC = () => {
                   <>
                     <Trash2 className="w-4 h-4" />
                     Supprimer
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Insert Période Before Confirmation Modal */}
+      {insertBeforeModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-12 h-12 rounded-full bg-primary-100 flex items-center justify-center">
+                <ListPlus className="w-6 h-6 text-primary-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Insérer une période avant N° {insertBeforeModal.numero}
+                </h3>
+                <p className="text-sm text-gray-500">Créer une nouvelle période intermédiaire</p>
+              </div>
+            </div>
+            
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <p className="text-sm text-blue-800">
+                <strong>ℹ️ Ce qui va se passer :</strong>
+              </p>
+              <ul className="text-sm text-blue-700 mt-2 list-disc list-inside space-y-1">
+                <li>Une nouvelle <strong>Période {insertBeforeModal.numero}</strong> vide sera créée</li>
+                <li>Le Métré N° {insertBeforeModal.numero} actuel deviendra <strong>N° {insertBeforeModal.numero + 1}</strong></li>
+                <li>Toutes les périodes suivantes seront renumérotées automatiquement</li>
+                <li>Les données existantes ne seront pas modifiées</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setInsertBeforeModal({ open: false, periodeId: null, numero: 0 })}
+                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                disabled={isInserting}
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleInsertPeriodeBefore}
+                disabled={isInserting}
+                className="px-4 py-2 text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors flex items-center gap-2"
+              >
+                {isInserting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Création...
+                  </>
+                ) : (
+                  <>
+                    <ListPlus className="w-4 h-4" />
+                    Insérer
                   </>
                 )}
               </button>

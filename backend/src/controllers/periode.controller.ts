@@ -198,6 +198,125 @@ export const updatePeriode = async (
 };
 
 /**
+ * Insert a new periode BEFORE an existing one
+ * Renumbers all subsequent periodes and creates the new one with a draft décompte
+ */
+export const insertPeriodeBefore = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) throw new ApiError('Not authenticated', 401);
+
+    const { id } = req.params; // ID of the target periode (insert BEFORE this one)
+    const pool = getPool();
+
+    // 1. Fetch the target period and verify ownership
+    const targetResult = await pool.query(
+      `SELECT pe.*, p.user_id as project_owner_id
+       FROM periodes pe
+       INNER JOIN projects p ON pe.project_id = p.id
+       WHERE pe.id = $1 AND p.user_id = $2 AND pe.deleted_at IS NULL AND p.deleted_at IS NULL`,
+      [id, req.user.id]
+    );
+
+    if (targetResult.rows.length === 0) {
+      throw new ApiError('Période non trouvée ou non autorisée', 404);
+    }
+
+    const targetPeriode = targetResult.rows[0];
+    const projectId = targetPeriode.project_id;
+    const insertAtNumero = targetPeriode.numero;
+
+    // 2. Cannot insert before period 1 if there are none before it — actually we CAN.
+    //    But inserting before period 1 would create a new period 1 and shift everything.
+    //    That's fine. The minimum is insertAtNumero >= 1.
+
+    if (insertAtNumero < 1) {
+      throw new ApiError('Numéro de période invalide', 400);
+    }
+
+    // 3. Use a transaction to ensure atomicity
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 4. Increment numero for all periodes >= insertAtNumero (in REVERSE order to avoid unique constraint violation)
+      //    We go from the highest numero down to insertAtNumero
+      const periodestoShift = await client.query(
+        `SELECT id, numero FROM periodes 
+         WHERE project_id = $1 AND numero >= $2 AND deleted_at IS NULL
+         ORDER BY numero DESC`,
+        [projectId, insertAtNumero]
+      );
+
+      for (const row of periodestoShift.rows) {
+        await client.query(
+          `UPDATE periodes SET numero = $1, updated_at = NOW() WHERE id = $2`,
+          [row.numero + 1, row.id]
+        );
+      }
+
+      // 5. Update libelle of shifted periodes to match new numero
+      for (const row of periodestoShift.rows) {
+        await client.query(
+          `UPDATE periodes SET libelle = $1 WHERE id = $2 AND libelle LIKE 'Période %'`,
+          [`Période ${row.numero + 1}`, row.id]
+        );
+      }
+
+      // 6. Update decompts numero to match their période's new numero
+      for (const row of periodestoShift.rows) {
+        await client.query(
+          `UPDATE decompts SET numero = $1, updated_at = NOW() 
+           WHERE periode_id = $2 AND deleted_at IS NULL`,
+          [row.numero + 1, row.id]
+        );
+      }
+
+      // 7. Create the new période at insertAtNumero
+      const now = new Date().toISOString();
+      const newPeriodeResult = await client.query(
+        `INSERT INTO periodes (
+          project_id, user_id, numero, libelle, date_debut, date_fin, statut
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING *`,
+        [projectId, req.user.id, insertAtNumero, `Période ${insertAtNumero}`, now, now, 'en_cours']
+      );
+
+      const newPeriode = newPeriodeResult.rows[0];
+
+      // 8. Create a draft décompte for the new période
+      await client.query(
+        `INSERT INTO decompts (
+          project_id, periode_id, user_id, numero, statut
+        ) VALUES ($1, $2, $3, $4, $5)`,
+        [projectId, newPeriode.id, req.user.id, insertAtNumero, 'draft']
+      );
+
+      await client.query('COMMIT');
+
+      logger.info(`Inserted new période ${insertAtNumero} before old ${insertAtNumero} (now ${insertAtNumero + 1}) in project ${projectId}`);
+
+      res.status(201).json({
+        success: true,
+        data: snakeToCamel(newPeriode),
+        message: `Période ${insertAtNumero} créée avec succès. Les périodes suivantes ont été renumérotées.`,
+      });
+    } catch (txError) {
+      await client.query('ROLLBACK');
+      throw txError;
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    logger.error('Error inserting periode before:', error);
+    next(error);
+  }
+};
+
+/**
  * Delete periode (soft delete)
  */
 export const deletePeriode = async (
