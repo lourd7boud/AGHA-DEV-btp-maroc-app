@@ -1032,6 +1032,88 @@ class ApiService {
     const response = await this.client.get('/admin/online');
     return response.data;
   }
+
+  // ==================== Profile & Signature ====================
+
+  async getProfile() {
+    const response = await this.client.get('/profile');
+    return response.data;
+  }
+
+  async updateProfile(data: {
+    firstName?: string;
+    lastName?: string;
+    jobTitle?: string;
+    phone?: string;
+    department?: string;
+    companyName?: string;
+  }) {
+    const response = await this.client.put('/profile', data);
+    return response.data;
+  }
+
+  async uploadSignature(imageData: string) {
+    const response = await this.client.post('/profile/signature', { imageData });
+    return response.data;
+  }
+
+  async uploadSignatureFile(file: File) {
+    const formData = new FormData();
+    formData.append('signature', file);
+    const response = await this.client.post('/profile/signature', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
+
+  async deleteSignature() {
+    const response = await this.client.delete('/profile/signature');
+    return response.data;
+  }
+
+  async uploadStamp(imageData: string) {
+    const response = await this.client.post('/profile/stamp', { imageData });
+    return response.data;
+  }
+
+  async uploadStampFile(file: File) {
+    const formData = new FormData();
+    formData.append('stamp', file);
+    const response = await this.client.post('/profile/stamp', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
+
+  async deleteStamp() {
+    const response = await this.client.delete('/profile/stamp');
+    return response.data;
+  }
+
+  async signDocument(data: {
+    documentType: string;
+    documentId?: string;
+    projectId?: string;
+    documentHash?: string;
+  }) {
+    const response = await this.client.post('/profile/sign-document', data);
+    return response.data;
+  }
+
+  async verifySignature(code: string) {
+    const response = await this.client.get(`/profile/verify/${code}`);
+    return response.data;
+  }
+
+  getSignatureImageUrl(signatureUrl: string): string {
+    if (!signatureUrl) return '';
+    // signatureUrl is like "/uploads/signatures/xxx.png"
+    // baseURL is "/api" in production — we need root-relative URL
+    const baseURL = this.client.defaults.baseURL || '/api';
+    // Remove /api suffix to get the server root
+    const serverRoot = baseURL.replace(/\/api\/?$/, '');
+    return `${serverRoot}${signatureUrl}`;
+  }
 }
 
 export const apiService = new ApiService();

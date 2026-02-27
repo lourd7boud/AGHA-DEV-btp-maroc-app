@@ -3,6 +3,7 @@ import autoTable from 'jspdf-autotable';
 import { Project, Bordereau, Periode } from '../db/database';
 import { formatMontant as financeFormatMontant } from './financeEngine';
 import { savePDF, hasFileSystemAccess } from './desktopFileService';
+import { loadSignatureData, logDocumentSigning, embedSignatureBlock, addVerificationFooter } from './pdfSignatureUtils';
 
 interface DecompteLigne {
   prixNo: number;
@@ -536,6 +537,39 @@ export async function generateDecomptePDF(
   doc.setFont('helvetica', 'normal');
   doc.text('1-', 10, yPos);
   doc.text('2-', pageWidth / 2, yPos);
+  yPos += 5;
+
+  // === Electronic Signature Integration ===
+  const sigData = await loadSignatureData();
+  let verificationCode = '';
+  let verificationUrl = '';
+
+  if (sigData && (sigData.signatureUrl || sigData.stampUrl)) {
+    // Log the signing event
+    const signResult = await logDocumentSigning(
+      'decompte',
+      periode.id,
+      project.id,
+    );
+    if (signResult) {
+      verificationCode = signResult.verificationCode;
+      verificationUrl = signResult.verificationUrl;
+    }
+
+    // Embed signature on left side (1-)
+    await embedSignatureBlock({
+      doc,
+      x: 15,
+      y: yPos,
+      signatureData: sigData,
+      verificationUrl,
+      signatureWidth: 35,
+      signatureHeight: 18,
+      showQR: false,
+      showSignerInfo: true,
+    });
+  }
+
   yPos += 20;
   
   doc.text('Vu et vérifié', 10, yPos);
@@ -563,6 +597,34 @@ export async function generateDecomptePDF(
   doc.text('A Tata, Le:', 10, yPos);
   yPos += 10;
   doc.text('Tata, le:', pageWidth / 2, yPos);
+
+  // === QR Code Verification Block ===
+  if (sigData && verificationCode) {
+    yPos += 10;
+    if (yPos > pageHeight - 40) {
+      doc.addPage();
+      yPos = 20;
+    }
+    await embedSignatureBlock({
+      doc,
+      x: pageWidth - 35,
+      y: yPos - 25,
+      signatureData: sigData,
+      verificationUrl,
+      showQR: true,
+      qrSize: 15,
+      showSignerInfo: false,
+      signatureWidth: 0,
+      signatureHeight: 0,
+    });
+
+    // Add verification footer to all pages
+    const totalPages = doc.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      addVerificationFooter(doc, verificationCode);
+    }
+  }
 
   // Save or Print PDF
   const fileName = `Decompte_${project.marcheNo}_Periode_${periode.numero}_${new Date().toISOString().split('T')[0]}.pdf`;

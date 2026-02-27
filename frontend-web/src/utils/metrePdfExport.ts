@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf';
 import autoTable, { RowInput, CellDef } from 'jspdf-autotable';
 import { Project, Bordereau, MetreSection, MetreSubSection } from '../db/database';
 import { savePDF, hasFileSystemAccess } from './desktopFileService';
+import { loadSignatureData, logDocumentSigning, embedSignatureBlock, addVerificationFooter } from './pdfSignatureUtils';
 
 // ============================================================
 // 📊 METRE PDF EXPORT - تصدير الميتري بالشكل الرسمي المغربي
@@ -401,6 +402,45 @@ export async function generateMetrePDF(
   doc.setFont('helvetica', 'normal');
   doc.text('Visa:', margin + 10, yPos);
   doc.text('Visa:', pageWidth / 2, yPos);
+
+  // === Electronic Signature Integration ===
+  const sigData = await loadSignatureData();
+  let verificationCode = '';
+
+  if (sigData && (sigData.signatureUrl || sigData.stampUrl)) {
+    const signResult = await logDocumentSigning(
+      'metre',
+      undefined,
+      project.id,
+    );
+    if (signResult) {
+      verificationCode = signResult.verificationCode;
+    }
+
+    // Embed signature under left "Visa:" label
+    yPos += 3;
+    await embedSignatureBlock({
+      doc,
+      x: margin + 10,
+      y: yPos,
+      signatureData: sigData,
+      verificationUrl: signResult?.verificationUrl,
+      signatureWidth: 35,
+      signatureHeight: 18,
+      showQR: true,
+      qrSize: 15,
+      showSignerInfo: true,
+    });
+
+    // Add verification footer to all pages
+    if (verificationCode) {
+      const totalPages = doc.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        addVerificationFooter(doc, verificationCode);
+      }
+    }
+  }
 
   // ═══════════════════════════════════════
   // حفظ الملف

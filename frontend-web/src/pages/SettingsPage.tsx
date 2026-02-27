@@ -11,6 +11,7 @@ import {
   Save,
   Info,
   RefreshCw,
+  UserCircle,
 } from 'lucide-react';
 import {
   getStorageConfig,
@@ -18,6 +19,7 @@ import {
   selectBaseFolder,
   StorageConfig,
 } from '../services/fileSystemService';
+import ProfileSignatureTab from '../components/ProfileSignatureTab';
 
 type StorageType = 'local' | 'onedrive' | 'google-drive' | 'custom';
 
@@ -37,7 +39,7 @@ const SettingsPage: FC = () => {
     localStorage.getItem('base_folder_name')
   );
   const [saved, setSaved] = useState(false);
-  const [activeSection, setActiveSection] = useState<'storage' | 'general' | 'about'>('storage');
+  const [activeSection, setActiveSection] = useState<'profile' | 'storage' | 'general' | 'about'>('profile');
 
   const storageOptions: StorageOption[] = [
     {
@@ -110,6 +112,18 @@ const SettingsPage: FC = () => {
         <div className="w-64 flex-shrink-0">
           <nav className="space-y-1">
             <button
+              onClick={() => setActiveSection('profile')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
+                activeSection === 'profile'
+                  ? 'bg-primary-50 text-primary-700 font-medium'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <UserCircle className="w-5 h-5" />
+              Profil & Signature
+              <ChevronRight className="w-4 h-4 ml-auto" />
+            </button>
+            <button
               onClick={() => setActiveSection('storage')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
                 activeSection === 'storage'
@@ -150,6 +164,9 @@ const SettingsPage: FC = () => {
 
         {/* Content */}
         <div className="flex-1">
+          {/* Profile & Signature */}
+          {activeSection === 'profile' && <ProfileSignatureTab />}
+
           {/* Storage Settings */}
           {activeSection === 'storage' && (
             <div className="card">

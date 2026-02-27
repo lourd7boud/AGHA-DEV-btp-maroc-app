@@ -48,6 +48,7 @@ import portalRoutes from './routes/portal.routes';
 import reportsRoutes from './routes/reports.routes';
 import ganttRoutes from './routes/gantt.routes';
 import adminRoutes from './routes/admin.routes';
+import profileRoutes from './routes/profile.routes';
 
 logger.info('All routes imported successfully');
 
@@ -190,6 +191,7 @@ app.use('/api/portal', portalRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/gantt', ganttRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/profile', profileRoutes);
 
 // Error handling
 app.use(notFound);

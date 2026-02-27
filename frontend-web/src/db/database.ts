@@ -14,6 +14,14 @@ export interface User {
   lastLogin?: string;
   token?: string;
   lastSync?: number;
+  // Profile & Signature fields
+  jobTitle?: string;
+  phone?: string;
+  department?: string;
+  companyName?: string;
+  signatureUrl?: string;
+  stampUrl?: string;
+  avatarUrl?: string;
 }
 
 export interface Project {
